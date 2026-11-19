@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tannimap"
+version = "0.1.0"
+description = "Check your grades and course plan against your own university handbook's graduation rules (Japanese universities)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "yukijames25"}]
+classifiers = ["Programming Language :: Python :: 3", "Natural Language :: Japanese", "Topic :: Education"]
+
+[project.scripts]
+tannimap = "tannimap.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
