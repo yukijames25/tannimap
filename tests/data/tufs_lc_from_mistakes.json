@@ -1,0 +1,67 @@
+{
+  "schema": "tannimap/1",
+  "university": "東京外国語大学",
+  "faculty": "言語文化学部 言語・情報コース（テスト用：「起こりうる単位修得ミス」の事例から作った一部の規則）",
+  "entry_years": "2016年度以降",
+  "source": {
+    "title": "起こりうる単位修得ミスについて（言語文化学部）",
+    "url": "https://www.tufs.ac.jp/documents/student/graduation/condition_check/220527_lc_miss.pdf",
+    "checked": "2026-11-20",
+    "note": "卒業所要単位の合計と関連科目の最低単位は、この資料には書かれていない。テストの都合で仮の値にしてある"
+  },
+  "total": {"min": 124, "page": "仮"},
+  "standard_years": 4,
+  "categories": [
+    {"id": "gengo", "name": "GLIP英語・教養外国語", "min": 6, "page": "1",
+     "match": {"name_patterns": ["^GLIP英語", "^教養外国語"]},
+     "alternatives": [
+       {"name": "GLIP英語で履修", "page": "1", "conditions": [
+         {"name": "GLIP英語A", "min": 4, "match": {"name_patterns": ["^GLIP英語A"]}},
+         {"name": "GLIP英語B", "min": 2, "match": {"name_patterns": ["^GLIP英語B"]}}]},
+       {"name": "教養外国語で履修", "page": "1",
+        "same_group": {"name": "ひとつの言語で6単位", "key_pattern": "^教養外国語(.+?)[AB]", "min": 6,
+                       "conditions": [{"name": "中級（B）", "min": 2, "match": {"name_patterns": ["^教養外国語.+B"]}}]}}
+     ]},
+    {"id": "chiiki_kiso", "name": "地域基礎", "min": 6, "max": 6, "page": "1",
+     "overflow": {"to": "kanren"},
+     "match": {"labels": ["地域基礎"]},
+     "note": "2016年度以降入学者は、6単位を超えた分を関連科目に含められる（2013〜2015年度入学者は含められない）"},
+    {"id": "kyoyo", "name": "教養科目", "min": 17, "page": "1", "children": [
+      {"id": "sekai", "name": "世界教養科目", "min": 16, "page": "1",
+       "match": {"label_patterns": ["^世界教養"]},
+       "conditions": [
+         {"name": "区分ア（現代を生きる・地球社会と生きる・人生を拓く）", "min": 4, "match": {"labels": ["世界教養ア"]}},
+         {"name": "区分イ（知と文化に挑む）", "min": 6, "match": {"labels": ["世界教養イ"]}},
+         {"name": "区分ウ（世界から日本を見る）", "min": 2, "match": {"labels": ["世界教養ウ"]}}]},
+      {"id": "sports", "name": "スポーツ・身体文化科目", "min": 1, "max": 1, "page": "2",
+       "overflow": {"to": "kanren", "max": 1},
+       "match": {"labels": ["スポーツ・身体文化"]}}
+    ]},
+    {"id": "dounyu", "name": "導入科目", "min": 6, "page": "3",
+     "match": {"label_patterns": ["^導入"]},
+     "conditions": [
+       {"name": "言語・情報コース開講", "min": 2, "match": {"labels": ["導入（言語・情報）"]}},
+       {"name": "総合文化コース開講", "min": 2, "match": {"labels": ["導入（総合文化）"]}},
+       {"name": "グローバルコミュニケーションコース開講", "min": 2, "match": {"labels": ["導入（GC）"]}}]},
+    {"id": "gairon", "name": "概論科目", "min": 10, "page": "3",
+     "match": {"label_patterns": ["^概論"]},
+     "conditions": [
+       {"name": "所属コースの開講科目", "min": 4, "match": {"labels": ["概論（所属コース）"]}},
+       {"name": "指定科目", "min": 6, "match": {"names": [
+         "言語学概論A", "言語学概論B", "音声学概論A", "音声学概論B", "言語教育学概論A", "言語教育学概論B",
+         "文化・文学概論A", "文化・文学概論B", "思想文化概論A", "思想文化概論B"]}}],
+     "note": "2つの条件を両方満たす科目は、どちらにも二重に数えてよい"},
+    {"id": "sentaku", "name": "選択科目（講義・専門演習）", "min": 16, "page": "4",
+     "match": {"labels": ["選択（所属コース）", "選択（他コース）", "卒業論文"]},
+     "limits": [{"name": "他コース開講の講義・演習", "max": 10, "match": {"labels": ["選択（他コース）"]}, "page": "4"}],
+     "required": ["卒業論文演習A", "卒業論文演習B", "卒業論文"],
+     "term_only": {"卒業論文演習A": "春学期のみ登録可", "卒業論文": "春学期のみ登録可"}},
+    {"id": "kanren", "name": "関連科目", "min": 0, "page": "2",
+     "match": {"labels": ["関連", "国際社会学部選択"]},
+     "note": "他学部の選択科目は選択科目ではなく関連科目に含まれる"},
+    {"id": "kyoshoku", "name": "教職に関する科目・情報技法", "counts": false, "page": "2",
+     "match": {"labels": ["教職", "情報技法"]},
+     "note": "教育職員免許状のための科目は、関連科目の必修単位（卒業所要単位）に含まれない"}
+  ],
+  "ask_office": ["指導教員を変更した場合、本ゼミの指定を含む変更手続きが済んでいるか"]
+}
