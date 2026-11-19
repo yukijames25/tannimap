@@ -69,7 +69,7 @@ class WebParity(unittest.TestCase):
     def test_same_results(self):
         cases = []
         for path in (("tests", "data", "tufs_lc_from_mistakes.json"), ("tests", "data", "hosei_jinkan_2022.json"),
-                     ("tests", "data", "kagawa_edu_2025.json")):
+                     ("tests", "data", "kagawa_edu_2025.json"), ("tests", "data", "kumamoto_pu_mgmt_2023.json")):
             cases += random_cases(_read(*path), 60, seed=len(cases) + 7)
         cases.append({"rules": _read("examples", "tufs_rules.json"), "grades": _read("examples", "grades.csv"),
                       "plan": _read("examples", "plan.csv"), "years": 2, "entry_year": 2024})
