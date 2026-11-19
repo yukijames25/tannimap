@@ -49,13 +49,19 @@ description: Check a Japanese university student's grades and course plan agains
    | 「履修できない」科目 | その科目だけを `names` で拾う `"counts": false` の区分を**先頭に**置く |
    | 「（ ）付き」「（4単位）」など表記の約束 | 便覧の凡例のページを読み、`max` / `min` に正しく直す |
    | 「3年次までに○単位」「進級要件」 | `progression`（`min_total` / `categories` / `in_year`） |
-   | 「1年次に○単位以上修得」 | `progression` の `in_year: {"year": 1, "min": 8}`（`check --entry-year` が必要） |
+   | 「1年次に○単位以上修得」（その年度だけ） | `progression` の `in_year: {"year": 1, "min": 8}`（`check --entry-year` が必要） |
+   | 「2年次までに○単位」（累積） | `progression` に `until_year: 2` を付け、`min_total` / `categories` / `required` を書く（`--entry-year` が必要） |
+   | 進級に必要な個別の科目（「プレゼミナールを含む」） | `progression` の `required` |
+   | 「上記のほかに○単位」「その他の単位」 | 親の `min` を子の `min` の合計より大きくする（差がどの子からでもよい分） |
+   | 「AかBから1科目（2単位）」の選択必修 | その科目だけを `names` で拾う区分に `min: 2` |
+   | 「その区分の要件には数えないが、上の区分には数える」科目 | その区分の**子にしない**。上の区分の直下に別の区分として置く（子に置くと、その区分が足りて見える） |
    | 入学年度で扱いが違う | その学生の入学年度の扱いだけを書き、`notes` に差を書く |
    | 「各1科目」「合わせて3科目以上」のような科目数の条件 | 書けない。単位数に置き換えられるなら置き換え、`ask_office` に残す |
 
    - 2つの区分に同時に入りうる科目は、より具体的な区分を先（兄弟の中で前）に書く。科目は最初に当てはまった区分に入る。
 
    - `page` は**印刷されているページ番号**（学生が冊子や PDF の下に見る番号）。PDF のページ番号と違うときは `source.note` に対応を書く。
+     冊子の一部を抜き出した PDF で番号が無いときは「PDF 2枚目 注エ」のように場所を書く。
    - **一部だけを照合するとき**（「全学共通科目だけ見たい」）は、照合しない区分を `"out_of_scope": true` で置き、`total.min` をその部分の小計にする。`counts: false` は「卒業単位にならない」という意味なので使わない。
    - 資料がチェックシート1枚でページ番号が無いときは、`page` に「チェックシート 3年→4年の列」のように場所を書く（数字で始まらない `page` はそのまま表示される）。
 
@@ -71,7 +77,10 @@ description: Check a Japanese university student's grades and course plan agains
    tannimap check rules.json grades.csv [--plan plan.csv] [--entry-year 入学年度] [--years 在学年数]
    ```
    - 終了コード: 0＝問題なし、1＝不足や不明点がある（報告に書いてある）、2＝エラー。1 は失敗ではない。
-   - `■ 成績表に一度も出てこない区分名` が出たら、その区分名は推測なので、成績表の表記と見比べてもらう（違っていると黙って0単位になる）。
+   - `--years` は給付奨学金の単位の基準を見たいときだけ付ける（在学年数）。卒業の判定には要らない。
+   - 表の「!」は、その区分か、その中の区分に問題があるしるし。
+   - `■ 成績表に一度も出てこない区分名・科目名の条件` が出たら、その書き方は推測なので、成績表の表記と見比べてもらう（違っていると黙って0単位になる）。
+   - 成績表の区分そのものが怪しい（科目名から見て別の分野に思える）ときは、勝手に直さず `ask_office` に書いて伝える。
    - `■ 規則にない区分の科目` が出たら、規則の `match` を推測で足さない。便覧で区分を確かめるか、学生に聞く。
    - 履修登録前の相談なら `--plan`（評価欄が空の表）で「予定どおり取れば足りるか」を見る。
 
@@ -111,7 +120,8 @@ description: Check a Japanese university student's grades and course plan agains
 
 - `match`: `labels`（区分名と完全一致）、`label_patterns`（区分の正規表現）、`names`（科目名と完全一致）、`name_patterns`（科目名の正規表現）、`exclude_names` / `exclude_patterns`。**どれか1つに当てはまれば対象（または）**。`exclude_*` に当てはまるものは除く。全角・半角と空白の違いは無視して比べる。
 - 成績表の列名は、科目名（科目名・授業科目名）、区分（区分・科目区分・分類）、単位（単位・単位数）、評価（評価・成績・評語）、年度、学期、状態（履修中・予定）を認識する。
-- `progression` に書けるキーは `name`・`min_total`（卒業単位に数える単位の合計）・`categories`（区分id→最低単位）・`in_year`・`page`・`note`。修得済みと予定込みの両方で判定される。
+- `progression` に書けるキーは `name`・`min_total`（卒業単位に数える単位の合計）・`categories`（区分id→最低単位）・`in_year`（その年度だけの修得）・`until_year`（その年次までの累積で判定）・`required`（必要な科目名）・`page`・`note`。修得済みと予定込みの両方で判定される。
+- 「AかBから1科目」のように個別の科目名が分からない必修（「必修10単位」とだけ書いてある）は、書けないので `ask_office` に残す。
 - `grading.gpa` を書かないと GPA は計算しない（他大学の点数で計算すると、正しく見えて間違うため）。
 - 子を持たない区分には `match` が必要。親の単位は子の合計（＋親自身の `match`）。
 - `same_group`: `{"name": "ひとつの言語で6単位", "key_pattern": "^教養外国語(.+?)[AB]", "min": 6, "conditions": [{"name": "中級", "min": 2, "match": {"name_patterns": ["B$"]}}]}`

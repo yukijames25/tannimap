@@ -340,15 +340,27 @@ def _year_of_study(c: Course, entry_year: int | None):
         return None
 
 
-def progression(r: Rules, sc: Scenario, courses: list, entry_year: int | None, keep: tuple) -> list:
-    """Each line is (label, have, need); have is None when it cannot be judged (ok is then None too)."""
+def progression(r: Rules, sc: Scenario, courses: list, entry_year: int | None, keep: tuple, scenario: str) -> list:
+    """Each line is (label, have, need); have is None when it cannot be judged (ok is then None too).
+
+    until_year: only courses earned up to that year of study count ("2年次までに39単位")."""
     out = []
     for p in r.progression:
         lines = []
+        until = p.get("until_year")
+        if until is not None:
+            if entry_year is None:
+                out.append({"name": str(p.get("name", "進級要件")), "page": str(p.get("page", "")),
+                            "note": str(p.get("note", "")), "ok": None,
+                            "lines": [(f"{until}年次までの修得（入学年度が必要）", None, 0.0)]})
+                continue
+            upto = [c for c in courses if (_year_of_study(c, entry_year) or 99) <= until]
+            sc, courses = run_scenario(r, upto, scenario), upto
+        prefix = f"{until}年次までの" if until is not None else ""
         if "min_total" in p:
-            lines.append(("合計（卒業単位に数える単位）", sc.total, float(p["min_total"])))
+            lines.append((prefix + "合計（卒業単位に数える単位）", sc.total, float(p["min_total"])))
         for cid, m in (p.get("categories") or {}).items():
-            lines.append((r.by_id[cid].name, sc.cats[cid].counted, float(m)))
+            lines.append((prefix + r.by_id[cid].name, sc.cats[cid].counted, float(m)))
         iy = p.get("in_year")
         if iy:
             year, need = int(iy["year"]), float(iy["min"])
@@ -406,6 +418,21 @@ def check(r: Rules, courses: list, years_enrolled: float | None = None, entry_ye
     now = run_scenario(r, courses, "now")
     plan = run_scenario(r, courses, "plan")
     return {"now": now, "plan": plan, "gpa": gpa(r, courses),
-            "progression_now": progression(r, now, courses, entry_year, SCENARIOS["now"]),
-            "progression_plan": progression(r, plan, courses, entry_year, SCENARIOS["plan"]),
-            "jasso": jasso(r, courses, now, years_enrolled), "unseen_labels": unseen_labels(r, courses)}
+            "progression_now": progression(r, now, courses, entry_year, SCENARIOS["now"], "now"),
+            "progression_plan": progression(r, plan, courses, entry_year, SCENARIOS["plan"], "plan"),
+            "jasso": jasso(r, courses, now, years_enrolled), "unseen_labels": unseen_labels(r, courses),
+            "empty_pools": empty_pools(r, courses)}
+
+
+def empty_pools(r: Rules, courses: list) -> list:
+    """Categories chosen by course names or patterns that no course in the transcript or plan matches.
+
+    A guessed name pattern that never matches silently counts 0, like a misspelled 区分 name."""
+    out = []
+    for cat in r.walk():
+        m = cat.match
+        if m is None or not (m.names or m.name_patterns or m.label_patterns):
+            continue
+        if not any(m.hits(c) for c in courses):
+            out.append(cat)
+    return out

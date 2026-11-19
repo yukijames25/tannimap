@@ -68,11 +68,12 @@ def table(r: Rules, now: Scenario, plan: Scenario) -> list:
             rows.append((name, "-", _n(a), _n(b), "-"))
             continue
         a, b = now.cats[c.id], plan.cats[c.id]
-        flag = " !" if b.problem_items else ""
+        flag = " !" if _has_problem(c, plan) else ""
         name = "  " * _depth(c) + c.name + flag
         need = _n(c.min) + (f"〜{_n(c.max)}" if c.max is not None and c.max != c.min else "")
         rows.append((name, need, _n(a.counted), _n(b.counted), _n(b.shortfall) if b.shortfall > EPS else "0"))
     rows.append(("合計", _n(r.total_min), _n(now.total), _n(plan.total), _n(max(0, r.total_min - plan.total))))
+    legend = any(_has_problem(c, plan) for c in r.walk() if c.counts)
     widths = [max(_w(row[i]) for row in rows) for i in range(5)]
     out = []
     for k, row in enumerate(rows):
@@ -80,7 +81,15 @@ def table(r: Rules, now: Scenario, plan: Scenario) -> list:
                              for i in range(5)))
         if k == 0:
             out.append("-" * (sum(widths) + 8))
+    if legend:
+        out.append("「!」はその区分か、その中の区分に問題があるしるし（内容は下の一覧）")
     return out
+
+
+def _has_problem(c: Category, sc: Scenario) -> bool:
+    if c.counts and sc.cats[c.id].problem_items:
+        return True
+    return any(_has_problem(ch, sc) for ch in c.children if ch.counts)
 
 
 def problem_items(r: Rules, sc: Scenario) -> list:
@@ -159,6 +168,9 @@ def text_report(r: Rules, result: dict, courses: list) -> str:
         L.append("")
         L.append("■ 卒業単位に含まれない単位（修得しても数に入らない）")
         L += [f"  - {x}" for x in dr]
+        if any(d for res in plan.cats.values() for d in res.dropped):
+            L.append("  ※ 上限を超えた分は、後から修得した科目の分として外しています。どの科目を外すかは計算の都合で、"
+                     "その科目自体が認められないという意味ではありません。")
     fails = [c for c in courses if c.status == "failed"]
     if fails:
         L.append("")
@@ -180,10 +192,12 @@ def text_report(r: Rules, result: dict, courses: list) -> str:
         L += [f"  ? {c.name}（区分: {c.label or '空欄'}）{_n(c.credits)}単位" for c in plan.unmatched]
     unseen = result.get("unseen_labels") or []
     important = [(c, lab) for c, lab in unseen if c.min > 0 or _in_progression(r, c)]
-    if important:
+    empty = [c for c in (result.get("empty_pools") or []) if (c.min > 0 or _in_progression(r, c)) and c.counts]
+    if important or empty:
         L.append("")
-        L.append("■ 成績表に一度も出てこない区分名（名前が実際と違うと、その区分は黙って0単位になる。成績表の表記と見比べる）")
-        L += [f"  ? 「{lab}」（{c.name}）" for c, lab in important]
+        L.append("■ 成績表に一度も出てこない区分名・科目名の条件（書き方が実際と違うと、その区分は黙って0単位になる。成績表の表記と見比べる）")
+        L += [f"  ? 区分名「{lab}」（{c.name}）" for c, lab in important]
+        L += [f"  ? 「{c.name}」の科目名の条件に当てはまる科目が1つもない" for c in empty]
     g = result["gpa"]
     L.append("")
     if g.get("no_scale"):
@@ -200,7 +214,7 @@ def text_report(r: Rules, result: dict, courses: list) -> str:
                  + ("（予定込み）" if has_plan else ""))
     j = result["jasso"]
     if j:
-        L.append(f"■ 給付奨学金の単位の基準（目安）: 標準 {_n(round(j['standard'], 1))}単位に対し、"
+        L.append(f"■ 給付奨学金の単位の基準（目安。卒業要件とは別の基準）: 標準 {_n(round(j['standard'], 1))}単位に対し、"
                  f"卒業単位に数えた修得 {_n(j['counted'])}単位（{j['counted_ratio']:.0%}・{j['counted_level']}）、"
                  f"修得した全単位 {_n(j['earned_all'])}単位（{j['earned_all_ratio']:.0%}・{j['earned_all_level']}）。"
                  "GPAの順位と出席率は大学のデータが必要なので判定していません。")
@@ -266,8 +280,9 @@ def canonical(r: Rules, result: dict) -> dict:
 def explain(r: Rules) -> str:
     """The rules restated in plain Japanese with pages, for the student to check against the handbook."""
     L = [title(r)]
-    if r.source:
-        L.append("出典: " + "、".join(f"{k}: {v}" for k, v in r.source.items()))
+    src = {k: v for k, v in r.source.items() if str(v).strip()}
+    if src:
+        L.append("出典: " + "、".join(f"{k}: {v}" for k, v in src.items()))
     L.append("")
     for c in r.walk():
         ind = "  " * _depth(c)
@@ -327,6 +342,8 @@ def explain(r: Rules) -> str:
         tot = f"合計 {p['min_total']}" if "min_total" in p else ""
         iy = p.get("in_year")
         yr = f"{iy['year']}年次に{iy['min']}単位" if iy else ""
+        if p.get("until_year") is not None:
+            tot = f"{p['until_year']}年次までに " + tot
         req = ("必修 " + "・".join(p.get("required"))) if p.get("required") else ""
         L.append(f"- 進級: {p.get('name', '')} {'、'.join(x for x in (tot, cats, yr, req) if x)}{_p(str(p.get('page', '')))}")
     if r.ask_office:

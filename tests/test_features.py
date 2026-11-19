@@ -110,12 +110,29 @@ class Round3(unittest.TestCase):
         cs = [C("基礎総合管理学I", 2, "基礎総合管理"), C("基礎総合管理学II", 2, "基礎総合管理"),
               C("基礎総合管理学演習", 1, "基礎総合管理"), C("専門演習I", 2, "専門演習")]
         cs += [C(f"基幹{i}", 2, "基幹（共通）") for i in range(16)]
-        res = check(r, cs)
+        res = check(r, cs, entry_year=2024)
         self.assertFalse(res["progression_now"][0]["ok"])  # プレゼミナール is missing
         cs.append(C("プレゼミナール", 1, "キャリアデザイン", PLANNED))
-        res = check(r, cs)
+        res = check(r, cs, entry_year=2024)
         self.assertFalse(res["progression_now"][0]["ok"])
         self.assertTrue(res["progression_plan"][0]["ok"])
+        self.assertIsNone(check(r, cs)["progression_now"][0]["ok"])  # "2年次までに" needs the entry year
+
+    def test_until_year_counts_only_early_courses(self):  # round 3: 「2年次までに39単位」
+        r = load_rules(data("kumamoto_pu_mgmt_2023.json"))
+        need = ["プレゼミナール", "基礎総合管理学I", "基礎総合管理学II", "基礎総合管理学演習", "専門演習I"]
+        cs = [C(n, 1, "基礎総合管理", year="2023") for n in need]
+        cs += [C(f"基幹{i}", 2, "基幹（共通）", year="2023") for i in range(17)]
+        self.assertTrue(check(r, cs, entry_year=2023)["progression_now"][0]["ok"])
+        late = [C(n, 1, "基礎総合管理", year="2023") for n in need] +                [C(f"基幹{i}", 2, "基幹（共通）", year="2025") for i in range(17)]
+        self.assertFalse(check(r, late, entry_year=2023)["progression_now"][0]["ok"])  # earned in 3rd year: too late
+
+    def test_name_patterns_that_match_nothing_are_reported(self):  # round 3: guessed 「新熊本学」 pattern
+        r = load_rules(data("kumamoto_pu_mgmt_2023.json"))
+        cs = [C("地域づくり入門", 2, "地域理解とリーダーシップ")]
+        res = check(r, cs)
+        self.assertIn("shinkumamoto", [c.id for c in res["empty_pools"]])
+        self.assertIn("科目名の条件に当てはまる科目が1つもない", text_report(r, res, cs))
 
     def test_other_faculty_cap_and_course_counted_elsewhere(self):
         r = load_rules(data("kumamoto_pu_mgmt_2023.json"))
