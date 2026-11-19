@@ -133,7 +133,7 @@ var TANNIMAP = (function () {
       min: num(sg.min, where + ".min"), page: page(sg), conditions: conditions(sg.conditions, where + ".conditions") };
   }
   const CAT_KEYS = ["id", "name", "min", "max", "overflow", "match", "counts", "required", "conditions", "limits",
-    "same_group", "alternatives", "page", "note", "term_only", "children", "per_name_max", "per_name_exclude"];
+    "same_group", "alternatives", "page", "note", "term_only", "children", "per_name_max", "per_name_exclude", "per_name_key", "out_of_scope"];
   function category(d, where, parent) {
     if (typeof d !== "object" || d === null || Array.isArray(d)) throw new RulesError(where + ": a category must be an object");
     const unknown = Object.keys(d).filter(k => !CAT_KEYS.includes(k));
@@ -149,8 +149,14 @@ var TANNIMAP = (function () {
       required: strs(d.required === undefined ? [] : d.required, where + ".required"),
       page: page(d), note: String(d.note || ""), term_only: {}, parent: parent || null,
       per_name_max: num(d.per_name_max, where + ".per_name_max", true), per_name_exclude: parseMatch(d.per_name_exclude, where + ".per_name_exclude"),
+      per_name_key: String(d.per_name_key || ""), out_of_scope: !!d.out_of_scope,
       conditions: [], limits: [], same_group: null, alternatives: [], children: [] };
     for (const k of Object.keys(d.term_only || {})) c.term_only[String(k)] = String(d.term_only[k]);
+    if (c.out_of_scope) c.counts = false;
+    if (c.per_name_key) {
+      let re0; try { re0 = new RegExp(nfkc(c.per_name_key)); } catch (e) { throw new RulesError(where + ".per_name_key: invalid pattern (" + e.message + ")"); }
+      if (new RegExp(re0.source + "|").exec("").length - 1 < 1) throw new RulesError(where + ".per_name_key: needs one (group) for the course key");
+    }
     if (c.overflow_to && c.max === null) throw new RulesError(where + ": overflow needs max (the credits kept here)");
     c.conditions = conditions(d.conditions, where + ".conditions");
     (d.alternatives || []).forEach((x, i) => {
@@ -328,6 +334,10 @@ var TANNIMAP = (function () {
     for (let i = 0; i < 4; i++) { if (ka[i] < kb[i]) return -1; if (ka[i] > kb[i]) return 1; }
     return 0;
   }
+  function nameKeyOf(cat, c) {
+    if (cat.per_name_key) { const m = new RegExp(nfkc(cat.per_name_key)).exec(nfkc(c.name)); if (m) return norm(m[1]); }
+    return norm(c.name);
+  }
   function shortfall(res) { return Math.max(0, res.cat.min - res.counted); }
   function sameGroupEval(sg, items, pg) {
     const pat = new RegExp(nfkc(sg.key_pattern)), groups = new Map();
@@ -406,10 +416,11 @@ var TANNIMAP = (function () {
     const pool = courses.filter(c => keep.includes(c.status) && c.credits > 0);
     const [taken, unmatched] = assign(r, pool);
     const incoming = {}; for (const c of walk(r)) incoming[c.id] = [];
-    const results = {}, notCounted = [];
+    const results = {}, notCounted = [], outScope = [];
     for (const cat of order(r)) {
       const res = { cat, counted: 0, items: [], dropped: [], moved_out: [], conditions: [], same_group: null, required: [], alternatives: [], child_shortfall: 0 };
       results[cat.id] = res;
+      if (cat.out_of_scope) { for (const c of taken[cat.id]) outScope.push([c, cat]); continue; }
       if (!cat.counts) { for (const c of taken[cat.id]) notCounted.push([c, cat]); continue; }
       let items = [];
       for (const ch of cat.children) if (results[ch.id].cat.counts) items = items.concat(results[ch.id].items.map(i => ({ course: i.course, credits: i.credits, via: i.via })));
@@ -421,7 +432,8 @@ var TANNIMAP = (function () {
       for (const it of items) {
         let room = it.credits, binding = null;
         const cappedName = cat.per_name_max !== null && !(cat.per_name_exclude && hits(cat.per_name_exclude, it.course));
-        if (cappedName) { const left = cat.per_name_max - (perName[norm(it.course.name)] || 0); if (left < room - EPS) { room = Math.max(0, left); binding = "name"; } }
+        const nameKey = cappedName ? nameKeyOf(cat, it.course) : "";
+        if (cappedName) { const left = cat.per_name_max - (perName[nameKey] || 0); if (left < room - EPS) { room = Math.max(0, left); binding = "name"; } }
         cat.limits.forEach((lim, li) => { if (hits(lim.match, it.course)) { const left = lim.max - used[li]; if (left < room - EPS) { room = Math.max(0, left); binding = li; } } });
         if (cat.max !== null) { const left = cat.max - res.counted; if (left < room - EPS) { room = Math.max(0, left); binding = "cat"; } }
         const take = Math.min(it.credits, room);
@@ -429,7 +441,7 @@ var TANNIMAP = (function () {
           res.items.push({ course: it.course, credits: take, via: it.via });
           res.counted += take;
           cat.limits.forEach((lim, li) => { if (hits(lim.match, it.course)) used[li] += take; });
-          if (cappedName) perName[norm(it.course.name)] = (perName[norm(it.course.name)] || 0) + take;
+          if (cappedName) perName[nameKey] = (perName[nameKey] || 0) + take;
         }
         const rest = it.credits - take;
         if (rest <= EPS) continue;
@@ -456,7 +468,7 @@ var TANNIMAP = (function () {
       res.child_shortfall = cat.children.filter(ch => ch.counts).reduce((s, ch) => s + shortfall(results[ch.id]), 0);
     }
     const total = r.categories.filter(c => c.counts).reduce((s, c) => s + results[c.id].counted, 0);
-    return { name, cats: results, total, unmatched, not_counted: notCounted };
+    return { name, cats: results, total, unmatched, not_counted: notCounted, out_of_scope: outScope };
   }
   function gpa(r, courses) {
     if (!r.gpa_points) return { gpa: null, points: 0, credits: 0, used: 0, skipped: [], no_scale: true };
@@ -543,8 +555,9 @@ var TANNIMAP = (function () {
   function droppedList(sc) {
     const out = [];
     for (const res of Object.values(sc.cats)) for (const d of res.dropped) {
-      const tag = d.course.status === IN_PROGRESS ? "（履修中）" : d.course.status === PLANNED ? "（予定）" : "";
-      out.push(d.course.name + tag + " " + fmtN(d.credits) + "単位: " + d.reason + pp(d.page));
+      const tag = d.course.status === IN_PROGRESS ? "履修中" : d.course.status === PLANNED ? "予定" : "";
+      const inner = [d.course.year ? d.course.year + "年度" : "", tag].filter(Boolean).join("・");
+      out.push(d.course.name + (inner ? "（" + inner + "）" : "") + " " + fmtN(d.credits) + "単位: " + d.reason + pp(d.page));
     }
     for (const [c, cat] of sc.not_counted) out.push(c.name + " " + fmtN(c.credits) + "単位: 「" + cat.name + "」は卒業単位に含まれない" + (cat.note ? "。" + cat.note : "") + pp(cat.page));
     return out;
@@ -561,9 +574,11 @@ var TANNIMAP = (function () {
     L.push("修得済 " + courses.filter(c => c.status === PASSED).length + "科目・履修中 " + nProg + "科目・予定 " + nPlan + "科目を読みました。", "");
     const rows = [["区分", "必要", "修得済", "予定込み", "不足(予定込み)"]];
     for (const c of walk(r)) {
-      const name = "  ".repeat(depth(c)) + c.name + (c.counts ? "" : "（算入されない）");
-      if (!c.counts) { rows.push([name, "-", "-", fmtN(plan.not_counted.filter(([, cat]) => cat.id === c.id).reduce((s, [x]) => s + x.credits, 0)), "-"]); continue; }
+      const sumOf = (lst) => fmtN(lst.filter(([, cat]) => cat.id === c.id).reduce((s, [x]) => s + x.credits, 0));
+      if (c.out_of_scope) { rows.push(["  ".repeat(depth(c)) + c.name + "（今回は照合しない）", "-", sumOf(now.out_of_scope), sumOf(plan.out_of_scope), "-"]); continue; }
+      if (!c.counts) { rows.push(["  ".repeat(depth(c)) + c.name + "（算入されない）", "-", sumOf(now.not_counted), sumOf(plan.not_counted), "-"]); continue; }
       const a = now.cats[c.id], b = plan.cats[c.id];
+      const name = "  ".repeat(depth(c)) + c.name + (problemItems(b).length ? " !" : "");
       const need = fmtN(c.min) + (c.max !== null && c.max !== c.min ? "〜" + fmtN(c.max) : "");
       rows.push([name, need, fmtN(a.counted), fmtN(b.counted), shortfall(b) > EPS ? fmtN(shortfall(b)) : "0"]);
     }
@@ -585,6 +600,13 @@ var TANNIMAP = (function () {
     if (mv.length) { L.push("", "■ 別の区分に振り替えて数えた単位"); for (const x of mv) L.push("  - " + x); }
     const dr = droppedList(plan);
     if (dr.length) { L.push("", "■ 卒業単位に含まれない単位（修得しても数に入らない）"); for (const x of dr) L.push("  - " + x); }
+    const fails = courses.filter(c => c.status === FAILED);
+    if (fails.length) { L.push("", "■ 不合格の科目（単位にならない。必修なら再履修が必要）"); for (const c of fails) L.push("  - " + c.name + "（" + (c.label || "区分なし") + "・" + fmtN(c.credits) + "単位・" + c.grade + (c.year ? "・" + c.year + "年度" : "") + "）"); }
+    if (plan.out_of_scope.length) {
+      L.push("", "■ 今回は照合していない区分（数に入らないという意味ではない）");
+      const names = new Map(); for (const [c, cat] of plan.out_of_scope) names.set(cat.name, (names.get(cat.name) || 0) + c.credits);
+      for (const [k, v] of names) L.push("  - " + k + ": " + fmtN(v) + "単位（予定込み）");
+    }
     if (plan.unmatched.length) { L.push("", "■ 規則にない区分の科目（どこに数えるか不明。学務に確認）"); for (const c of plan.unmatched) L.push("  ? " + c.name + "（区分: " + (c.label || "空欄") + "）" + fmtN(c.credits) + "単位"); }
     const important = (result.unseen_labels || []).filter(([c]) => c.min > 0 || inProgression(r, c));
     if (important.length) { L.push("", "■ 成績表に一度も出てこない区分名（名前が実際と違うと、その区分は黙って0単位になる。成績表の表記と見比べる）"); for (const [c, lab] of important) L.push("  ? 「" + lab + "」（" + c.name + "）"); }

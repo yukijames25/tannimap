@@ -83,6 +83,7 @@ class Scenario:
     total: float
     unmatched: list                 # courses no category takes
     not_counted: list               # (course, category) for counts=False categories
+    out_of_scope: list = field(default_factory=list)  # (course, category) for out_of_scope categories
 
 
 def _n(x: float) -> str:
@@ -139,6 +140,15 @@ def assign(r: Rules, courses: list) -> tuple[dict, list]:
     return taken, unmatched
 
 
+def _name_key(cat: Category, c: Course) -> str:
+    """What counts as "the same course" for per_name_max."""
+    if cat.per_name_key:
+        m = re.search(unicodedata.normalize("NFKC", cat.per_name_key), unicodedata.normalize("NFKC", c.name))
+        if m:
+            return norm(m.group(1))
+    return norm(c.name)
+
+
 def _sort_key(it: Item):
     c = it.course
     return (STATUS_ORDER.get(c.status, 9), str(c.year), str(c.term), c.row)
@@ -150,10 +160,13 @@ def run_scenario(r: Rules, courses: list, name: str) -> Scenario:
     taken, unmatched = assign(r, pool)
     incoming: dict[str, list] = {c.id: [] for c in r.walk()}
     results: dict[str, CatResult] = {}
-    not_counted = []
+    not_counted, out_scope = [], []
     for cat in _order(r):
         res = CatResult(cat)
         results[cat.id] = res
+        if cat.out_of_scope:
+            out_scope += [(c, cat) for c in taken[cat.id]]
+            continue
         if not cat.counts:
             not_counted += [(c, cat) for c in taken[cat.id]]
             continue
@@ -170,8 +183,9 @@ def run_scenario(r: Rules, courses: list, name: str) -> Scenario:
         for it in items:
             room, binding = it.credits, None
             capped_name = cat.per_name_max is not None and not (cat.per_name_exclude and cat.per_name_exclude.hits(it.course))
+            name_key = _name_key(cat, it.course) if capped_name else ""
             if capped_name:
-                left = cat.per_name_max - per_name.get(norm(it.course.name), 0.0)
+                left = cat.per_name_max - per_name.get(name_key, 0.0)
                 if left < room - EPS:
                     room, binding = max(0.0, left), "name"
             for lim in cat.limits:
@@ -188,7 +202,7 @@ def run_scenario(r: Rules, courses: list, name: str) -> Scenario:
                 res.items.append(Item(it.course, take, it.via))
                 res.counted += take
                 if capped_name:
-                    per_name[norm(it.course.name)] = per_name.get(norm(it.course.name), 0.0) + take
+                    per_name[name_key] = per_name.get(name_key, 0.0) + take
                 for lim in cat.limits:
                     if lim.match.hits(it.course):
                         used_limit[id(lim)] += take
@@ -223,7 +237,7 @@ def run_scenario(r: Rules, courses: list, name: str) -> Scenario:
         _check(cat, res, courses, keep)
         res.child_shortfall = sum(results[ch.id].shortfall for ch in cat.children if ch.counts)
     total = sum(results[c.id].counted for c in r.categories if c.counts)
-    return Scenario(name, results, total, unmatched, not_counted)
+    return Scenario(name, results, total, unmatched, not_counted, out_scope)
 
 
 def _same_group(sg, items: list, page: str) -> tuple:

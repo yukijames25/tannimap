@@ -49,12 +49,21 @@ def title(r: Rules) -> str:
 def table(r: Rules, now: Scenario, plan: Scenario) -> list:
     rows = [("区分", "必要", "修得済", "予定込み", "不足(予定込み)")]
     for c in r.walk():
-        name = "  " * _depth(c) + c.name + ("（算入されない）" if not c.counts else "")
+        if c.out_of_scope:
+            name = "  " * _depth(c) + c.name + "（今回は照合しない）"
+            a = sum(x.credits for x, cat in now.out_of_scope if cat.id == c.id)
+            b = sum(x.credits for x, cat in plan.out_of_scope if cat.id == c.id)
+            rows.append((name, "-", _n(a), _n(b), "-"))
+            continue
         if not c.counts:
-            nc = sum(x.credits for x, cat in plan.not_counted if cat.id == c.id)
-            rows.append((name, "-", "-", _n(nc), "-"))
+            name = "  " * _depth(c) + c.name + "（算入されない）"
+            a = sum(x.credits for x, cat in now.not_counted if cat.id == c.id)
+            b = sum(x.credits for x, cat in plan.not_counted if cat.id == c.id)
+            rows.append((name, "-", _n(a), _n(b), "-"))
             continue
         a, b = now.cats[c.id], plan.cats[c.id]
+        flag = " !" if b.problem_items else ""
+        name = "  " * _depth(c) + c.name + flag
         need = _n(c.min) + (f"〜{_n(c.max)}" if c.max is not None and c.max != c.min else "")
         rows.append((name, need, _n(a.counted), _n(b.counted), _n(b.shortfall) if b.shortfall > EPS else "0"))
     rows.append(("合計", _n(r.total_min), _n(now.total), _n(plan.total), _n(max(0, r.total_min - plan.total))))
@@ -89,12 +98,18 @@ def problems(r: Rules, sc: Scenario) -> list:
     return [t for _k, t in problem_items(r, sc)]
 
 
+def _when(c) -> str:
+    tag = {IN_PROGRESS: "履修中", PLANNED: "予定"}.get(c.status, "")
+    year = f"{c.year}年度" if c.year else ""
+    inner = "・".join(x for x in (year, tag) if x)
+    return f"（{inner}）" if inner else ""
+
+
 def dropped(sc: Scenario) -> list:
     out = []
     for res in sc.cats.values():
         for d in res.dropped:
-            tag = {IN_PROGRESS: "（履修中）", PLANNED: "（予定）"}.get(d.course.status, "")
-            out.append(f"{d.course.name}{tag} {_n(d.credits)}単位: {d.reason}{_p(d.page)}")
+            out.append(f"{d.course.name}{_when(d.course)} {_n(d.credits)}単位: {d.reason}{_p(d.page)}")
     for c, cat in sc.not_counted:
         note = f"。{cat.note}" if cat.note else ""
         out.append(f"{c.name} {_n(c.credits)}単位: 「{cat.name}」は卒業単位に含まれない{note}{_p(cat.page)}")
@@ -138,6 +153,21 @@ def text_report(r: Rules, result: dict, courses: list) -> str:
         L.append("")
         L.append("■ 卒業単位に含まれない単位（修得しても数に入らない）")
         L += [f"  - {x}" for x in dr]
+    fails = [c for c in courses if c.status == "failed"]
+    if fails:
+        L.append("")
+        L.append("■ 不合格の科目（単位にならない。必修なら再履修が必要）")
+        for c in fails:
+            label = c.label or "区分なし"
+            year = f"・{c.year}年度" if c.year else ""
+            L.append(f"  - {c.name}（{label}・{_n(c.credits)}単位・{c.grade}{year}）")
+    if plan.out_of_scope:
+        L.append("")
+        L.append("■ 今回は照合していない区分（数に入らないという意味ではない）")
+        names = {}
+        for c, cat in plan.out_of_scope:
+            names[cat.name] = names.get(cat.name, 0.0) + c.credits
+        L += [f"  - {k}: {_n(v)}単位（予定込み）" for k, v in names.items()]
     if plan.unmatched:
         L.append("")
         L.append("■ 規則にない区分の科目（どこに数えるか不明。学務に確認）")
@@ -267,6 +297,8 @@ def explain(r: Rules) -> str:
         for x in c.limits:
             ov = f"、超過分は「{r.by_id[x.overflow_to].name}」へ" if x.overflow_to else ""
             L.append(f"{ind}    上限: {x.name}は{_n(x.max)}単位まで{ov}{_p(x.page)}")
+        if c.out_of_scope:
+            L.append(f"{ind}    （今回は照合しない区分）")
         if c.per_name_max is not None:
             ex = ""
             if c.per_name_exclude:

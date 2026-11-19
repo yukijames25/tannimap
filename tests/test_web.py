@@ -82,6 +82,7 @@ class WebParity(unittest.TestCase):
             self.assertNotIn("error", py, f"case {i}: python failed: {py.get('error')}")
             self.assertNotIn("error", out, f"case {i}: js failed: {out.get('error')}")
             self.assertEqual(py["ok"], out["ok"], f"case {i} differs")
+            self.assertEqual(py["text"], out["text"], f"case {i}: report text differs")
 
 
 if __name__ == "__main__":

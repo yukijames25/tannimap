@@ -126,7 +126,10 @@ def main() -> int:
                 agree[f"{sc}.{f}"] += ok
                 same_all &= ok
         common = set(vk["progression"]) & set(vo["progression"])
-        prog_ok = bool(common) and all(vk["progression"][t] == vo["progression"][t] for t in common)
+        if not vk["progression"] and not vo["progression"]:
+            prog_ok = True  # neither has progression requirements: nothing to disagree on
+        else:
+            prog_ok = bool(common) and all(vk["progression"][t] == vo["progression"][t] for t in common)
         agree["progression"] += prog_ok
         same_all &= prog_ok
         agree["everything"] += same_all

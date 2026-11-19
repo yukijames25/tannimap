@@ -151,6 +151,8 @@ class Category:
     term_only: dict = field(default_factory=dict)  # course -> "春学期のみ登録可" etc.
     per_name_max: float | None = None   # 「同一授業科目は1授業2単位まで」: credits per course name
     per_name_exclude: Match | None = None
+    per_name_key: str = ""              # regex whose group 1 names "the same course" (default: the whole name)
+    out_of_scope: bool = False          # not checked this time (e.g. 専門科目 when only checking 全学共通科目)
     children: list = field(default_factory=list)
     parent: "Category | None" = None
 
@@ -199,7 +201,8 @@ def _page(d) -> str:
 
 
 CAT_KEYS = {"id", "name", "min", "max", "overflow", "match", "counts", "required", "conditions", "limits",
-            "same_group", "alternatives", "page", "note", "term_only", "children", "per_name_max", "per_name_exclude"}
+            "same_group", "alternatives", "page", "note", "term_only", "children", "per_name_max", "per_name_exclude",
+            "per_name_key", "out_of_scope"}
 
 
 def _conditions(lst, where) -> list:
@@ -245,8 +248,19 @@ def _category(d, where, parent=None) -> Category:
         term_only={str(k): str(v) for k, v in (d.get("term_only") or {}).items()},
         per_name_max=_num(d.get("per_name_max"), f"{where}.per_name_max", True),
         per_name_exclude=Match.parse(d.get("per_name_exclude"), f"{where}.per_name_exclude"),
+        per_name_key=str(d.get("per_name_key", "")),
+        out_of_scope=bool(d.get("out_of_scope", False)),
         parent=parent,
     )
+    if c.out_of_scope:
+        c.counts = False
+    if c.per_name_key:
+        try:
+            groups = re.compile(unicodedata.normalize("NFKC", c.per_name_key)).groups
+        except re.error as e:
+            raise RulesError(f"{where}.per_name_key: invalid pattern ({e})") from None
+        if groups < 1:
+            raise RulesError(f"{where}.per_name_key: needs one (group) for the course key")
     if c.overflow_to and c.max is None:
         raise RulesError(f"{where}: overflow needs max (the credits kept here)")
     c.conditions = _conditions(d.get("conditions"), f"{where}.conditions")
