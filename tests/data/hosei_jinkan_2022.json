@@ -1,0 +1,75 @@
+{
+  "schema": "tannimap/1",
+  "university": "法政大学",
+  "faculty": "人間環境学部（留学生・SSI生・RSP生を除く）",
+  "entry_years": "2022〜2025年度",
+  "source": {
+    "title": "人間環境学部 進級・卒業単位チェックシート（2022〜2025年度入学者用）",
+    "url": "https://gakububbs.hosei.ac.jp/wp-content/uploads/jinkan2022-2025.pdf",
+    "checked": "2026-11-20",
+    "note": "区分の名前（labels）は、テスト用の成績表に合わせて付けたもの。実際のポータルの表記に合わせて直す"
+  },
+  "total": {"min": 130, "page": "1"},
+  "standard_years": 4,
+  "categories": [
+    {"id": "ilac", "name": "ILAC科目", "min": 40, "page": "1", "children": [
+      {"id": "kiban", "name": "基盤科目（100番台）", "min": 16, "page": "1", "children": [
+        {"id": "kiban0", "name": "0群", "page": "1", "match": {"labels": ["基盤0群"]}},
+        {"id": "kiban1", "name": "1群（人文科学分野）", "min": 4, "page": "1", "match": {"labels": ["基盤1群"]}},
+        {"id": "kiban2", "name": "2群（社会科学分野）", "min": 4, "page": "1", "match": {"labels": ["基盤2群"]}},
+        {"id": "kiban3", "name": "3群（自然科学分野）", "min": 4, "page": "1", "match": {"labels": ["基盤3群"]}},
+        {"id": "kiban5h", "name": "5群（保健体育分野）必修", "min": 2, "page": "1", "match": {"labels": ["基盤5群必修"]}},
+        {"id": "kiban5s", "name": "5群（保健体育分野）選択", "max": 2, "page": "1", "match": {"labels": ["基盤5群選択"]}}
+      ]},
+      {"id": "gaikoku100", "name": "外国語科目（100番台）", "min": 8, "page": "1", "children": [
+        {"id": "eigo100", "name": "4群（英語）", "min": 4, "page": "1", "match": {"labels": ["英語100"]}},
+        {"id": "shogai100", "name": "4群（諸外国語）", "min": 4, "page": "1", "match": {"labels": ["諸外国語100"]}}
+      ]},
+      {"id": "la", "name": "リベラルアーツ科目（200番台）", "min": 8, "page": "1", "children": [
+        {"id": "la0", "name": "0群", "page": "1", "match": {"labels": ["LA0群"]}},
+        {"id": "la1", "name": "1群（人文科学）", "min": 2, "page": "1", "match": {"labels": ["LA1群"]}},
+        {"id": "la2", "name": "2群（社会科学）", "min": 2, "page": "1", "match": {"labels": ["LA2群"]}},
+        {"id": "la3", "name": "3群（自然科学）", "min": 2, "page": "1", "match": {"labels": ["LA3群"]}},
+        {"id": "la4", "name": "4群（外国語科目）", "page": "1", "match": {"labels": ["LA4群"]}},
+        {"id": "la5", "name": "5群（体育科目）", "page": "1", "match": {"labels": ["LA5群"]}}
+      ]},
+      {"id": "gaikoku200", "name": "外国語科目（200番台）", "min": 2, "page": "1", "children": [
+        {"id": "shogai200", "name": "4群（諸外国語科目）必修", "min": 2, "page": "1", "match": {"labels": ["諸外国語200"]}},
+        {"id": "kyotsu200", "name": "英語諸外国語共通", "page": "1", "match": {"labels": ["英語諸外国語共通200"]}}
+      ]}
+    ]},
+    {"id": "senmon", "name": "専門科目", "min": 90, "page": "1", "children": [
+      {"id": "literacy", "name": "リテラシー科目", "min": 6, "page": "1", "children": [
+        {"id": "freshman", "name": "フレッシュマン科目", "min": 4, "page": "1", "match": {"labels": ["フレッシュマン"]},
+         "required": ["人間環境学への招待", "基礎演習"]},
+        {"id": "skillup", "name": "スキルアップ科目（情報処理・アクティブ語学・テーマ別英語）", "min": 2, "page": "1",
+         "match": {"labels": ["スキルアップ"]}}
+      ]},
+      {"id": "tenkai", "name": "展開科目", "min": 84, "page": "1", "children": [
+        {"id": "kyotsu", "name": "コース共通", "min": 10, "page": "1", "match": {"labels": ["コース共通"]}},
+        {"id": "core", "name": "コースコア", "min": 20, "page": "1", "match": {"labels": ["コースコア"]}},
+        {"id": "renkan", "name": "コース連環", "page": "1", "match": {"labels": ["コース連環"]}},
+        {"id": "seminar", "name": "人間環境セミナー・フィールドスタディ・キャリアチャレンジ（選択必修）", "min": 6, "page": "1",
+         "match": {"labels": ["人間環境セミナー", "フィールドスタディ", "海外フィールドスタディ", "キャリアチャレンジ"]},
+         "limits": [
+           {"name": "フィールドスタディ・海外フィールドスタディ", "max": 8, "page": "1",
+            "match": {"labels": ["フィールドスタディ", "海外フィールドスタディ"]}},
+           {"name": "キャリアチャレンジ", "max": 6, "page": "1", "match": {"labels": ["キャリアチャレンジ"]}}]},
+        {"id": "kenkyukai", "name": "研究会", "max": 20, "page": "1", "match": {"labels": ["研究会"]}},
+        {"id": "ronbun", "name": "卒業論文（研究会修了論文・コース修了論文）", "max": 2, "page": "1", "match": {"labels": ["卒業論文"]}},
+        {"id": "tokuron", "name": "人間環境特論", "page": "1", "match": {"labels": ["人間環境特論"]}},
+        {"id": "abroad", "name": "スタディ・アブロード", "max": 16, "page": "1", "match": {"labels": ["スタディ・アブロード"]}},
+        {"id": "scope", "name": "SCOPE科目", "max": 12, "page": "1", "match": {"labels": ["SCOPE"]}},
+        {"id": "jiyu", "name": "自由科目", "max": 20, "page": "1", "match": {"labels": ["自由科目"]}}
+      ]}
+    ]}
+  ],
+  "progression": [
+    {"name": "2年→3年 進級要件", "page": "1", "categories": {"freshman": 4},
+     "note": "このほか「2年次に4単位以上修得していること」（年次ごとの修得単位は学務の記録で確認）"},
+    {"name": "3年→4年 進級要件", "page": "1", "min_total": 81,
+     "categories": {"kiban5h": 2, "eigo100": 4, "shogai100": 4, "shogai200": 2, "skillup": 2}}
+  ],
+  "ask_office": ["4年次に4単位以上修得しているか（卒業要件。年次ごとの修得単位は学務の記録で確認）"],
+  "notes": ["1年→2年の進級には、1年次に8単位以上の修得が必要", "半期・年間休学をした場合は、この表どおりにならないことがある"]
+}
