@@ -297,7 +297,8 @@ def load_rules(data) -> Rules:
         categories=cats,
         grading_pass=_strs(g.get("pass", DEFAULT_PASS), "grading.pass"),
         grading_fail=_strs(g.get("fail", DEFAULT_FAIL), "grading.fail"),
-        gpa_points={str(k): float(v) for k, v in (g.get("gpa") or DEFAULT_GPA).items()},
+        # no default scale: a GPA on someone else's points would look right and be wrong
+        gpa_points={str(k): float(v) for k, v in g["gpa"].items()} if g.get("gpa") else None,
         gpa_exclude=_strs(g.get("gpa_exclude", ["認", "認定", "合", "合格", "P", "否", "不合格"]), "grading.gpa_exclude"),
         standard_years=int(data["standard_years"]) if data.get("standard_years") else None,
         progression=list(data.get("progression") or []),
@@ -320,9 +321,16 @@ def load_rules(data) -> Rules:
                 raise RulesError(f"{where}: cannot overflow into {t!r}, which does not count")
     _check_cycles(r)
     for i, p in enumerate(r.progression):
+        unknown = set(p) - {"name", "min_total", "categories", "in_year", "page", "note"}
+        if unknown:
+            raise RulesError(f"progression[{i}]: unknown keys {sorted(unknown)} "
+                             "(allowed: name, min_total, categories, in_year, page, note)")
         for cid in (p.get("categories") or {}):
             if cid not in r.by_id:
                 raise RulesError(f"progression[{i}]: no category with id {cid!r}")
+        iy = p.get("in_year")
+        if iy is not None and (not isinstance(iy, dict) or "year" not in iy or "min" not in iy):
+            raise RulesError(f"progression[{i}].in_year: write {{\"year\": 1, \"min\": 8}} (credits earned in that year of study)")
     return r
 
 

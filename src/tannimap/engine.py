@@ -287,6 +287,8 @@ def _req_hit(req: str, c: Course) -> bool:
 
 # ---- GPA / progression / JASSO --------------------------------------------
 def gpa(r: Rules, courses: list) -> dict:
+    if not r.gpa_points:
+        return {"gpa": None, "points": 0.0, "credits": 0.0, "used": 0, "skipped": [], "no_scale": True}
     pts = {norm(k): v for k, v in r.gpa_points.items()}
     excl = {norm(x) for x in r.gpa_exclude}
     num = den = 0.0
@@ -305,17 +307,50 @@ def gpa(r: Rules, courses: list) -> dict:
             "used": len(used), "skipped": [(c.name, c.grade) for c in skipped]}
 
 
-def progression(r: Rules, sc: Scenario) -> list:
+def _year_of_study(c: Course, entry_year: int | None):
+    try:
+        return int(str(c.year).strip()[:4]) - entry_year + 1 if entry_year else None
+    except ValueError:
+        return None
+
+
+def progression(r: Rules, sc: Scenario, courses: list, entry_year: int | None, keep: tuple) -> list:
+    """Each line is (label, have, need); have is None when it cannot be judged (ok is then None too)."""
     out = []
     for p in r.progression:
         lines = []
         if "min_total" in p:
-            lines.append(("合計", sc.total, float(p["min_total"])))
+            lines.append(("合計（卒業単位に数える単位）", sc.total, float(p["min_total"])))
         for cid, m in (p.get("categories") or {}).items():
             lines.append((r.by_id[cid].name, sc.cats[cid].counted, float(m)))
+        iy = p.get("in_year")
+        if iy:
+            year, need = int(iy["year"]), float(iy["min"])
+            label = f"{year}年次に修得した単位"
+            if entry_year is None:
+                lines.append((label + "（入学年度が必要）", None, need))
+            else:
+                have = sum(c.credits for c in courses
+                           if c.status in keep and _year_of_study(c, entry_year) == year)
+                lines.append((label, have, need))
+        ok = None if any(h is None for _x, h, _m in lines) else all(h + EPS >= m for _x, h, m in lines)
         out.append({"name": str(p.get("name", "進級要件")), "page": str(p.get("page", "")),
-                    "note": str(p.get("note", "")), "lines": lines,
-                    "ok": all(h + EPS >= m for _x, h, m in lines)})
+                    "note": str(p.get("note", "")), "lines": lines, "ok": ok})
+    return out
+
+
+def unseen_labels(r: Rules, courses: list) -> list:
+    """(category, label) for labels in the rules that no course in the transcript has.
+
+    A misspelled or guessed 区分 name silently counts as 0 credits, so the student must see these."""
+    seen = {norm(c.label) for c in courses if c.label}
+    out = []
+    for cat in r.walk():
+        if cat.match is None:
+            continue
+        for lab in cat.match.labels:
+            if norm(lab) not in seen:
+                out.append((cat, lab))
     return out
 
 
@@ -338,9 +373,10 @@ def jasso(r: Rules, courses: list, sc_now: Scenario, years_enrolled: float | Non
     return out
 
 
-def check(r: Rules, courses: list, years_enrolled: float | None = None) -> dict:
+def check(r: Rules, courses: list, years_enrolled: float | None = None, entry_year: int | None = None) -> dict:
     now = run_scenario(r, courses, "now")
     plan = run_scenario(r, courses, "plan")
     return {"now": now, "plan": plan, "gpa": gpa(r, courses),
-            "progression_now": progression(r, now), "progression_plan": progression(r, plan),
-            "jasso": jasso(r, courses, now, years_enrolled)}
+            "progression_now": progression(r, now, courses, entry_year, SCENARIOS["now"]),
+            "progression_plan": progression(r, plan, courses, entry_year, SCENARIOS["plan"]),
+            "jasso": jasso(r, courses, now, years_enrolled), "unseen_labels": unseen_labels(r, courses)}

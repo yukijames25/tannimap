@@ -19,7 +19,18 @@ def _pad(s: str, width: int) -> str:
 
 
 def _p(page: str) -> str:
-    return f"（p.{page}）" if page else ""
+    """"12" -> （p.12）; a description such as "チェックシート 3年→4年の列" is shown as is."""
+    if not page:
+        return ""
+    return f"（p.{page}）" if page[:1].isdigit() else f"（{page}）"
+
+
+def _ok(ok) -> str:
+    return "判定できない" if ok is None else "満たしている" if ok else "満たしていない"
+
+
+def _in_progression(r: Rules, c: Category) -> bool:
+    return any(c.id in (p.get("categories") or {}) for p in r.progression)
 
 
 def _depth(c: Category) -> int:
@@ -131,16 +142,26 @@ def text_report(r: Rules, result: dict, courses: list) -> str:
         L.append("")
         L.append("■ 規則にない区分の科目（どこに数えるか不明。学務に確認）")
         L += [f"  ? {c.name}（区分: {c.label or '空欄'}）{_n(c.credits)}単位" for c in plan.unmatched]
+    unseen = result.get("unseen_labels") or []
+    important = [(c, lab) for c, lab in unseen if c.min > 0 or _in_progression(r, c)]
+    if important:
+        L.append("")
+        L.append("■ 成績表に一度も出てこない区分名（名前が実際と違うと、その区分は黙って0単位になる。成績表の表記と見比べる）")
+        L += [f"  ? 「{lab}」（{c.name}）" for c, lab in important]
     g = result["gpa"]
     L.append("")
-    if g["gpa"] is not None:
+    if g.get("no_scale"):
+        L.append("■ GPA: 規則に評語ごとの点数（grading.gpa）がないので計算していません")
+    elif g["gpa"] is not None:
         skipped = f"、{len(g['skipped'])}科目は評価が数値にならないため除外" if g["skipped"] else ""
         L.append(f"■ GPA {g['gpa']:.2f}（{g['used']}科目・{_n(g['credits'])}単位で計算{skipped}）")
-    for title_, prog in (("進級要件（修得済）", result["progression_now"]),):
-        for p in prog:
-            mark = "満たしている" if p["ok"] else "満たしていない"
-            lines = "、".join(f"{n} {_n(h)}/{_n(m)}" for n, h, m in p["lines"])
-            L.append(f"■ {p['name']}: {mark}（{lines}）{_p(p['page'])}{('　' + p['note']) if p['note'] else ''}")
+    has_plan = bool(n_prog or n_plan)
+    for p, q in zip(result["progression_now"], result["progression_plan"]):
+        L.append(f"■ {p['name']}: {_ok(p['ok'])}（修得済）" + (f"／{_ok(q['ok'])}（予定込み）" if has_plan else "")
+                 + f"{_p(p['page'])}{('　' + p['note']) if p['note'] else ''}")
+        src = q if has_plan else p
+        L.append("    " + "、".join(f"{n} {'?' if h is None else _n(h)}/{_n(m)}" for n, h, m in src["lines"])
+                 + ("（予定込み）" if has_plan else ""))
     j = result["jasso"]
     if j:
         L.append(f"■ 給付奨学金の単位の基準（目安）: 標準 {_n(round(j['standard'], 1))}単位に対し、"
@@ -189,6 +210,21 @@ def _sg_text(sg) -> str:
     sub = "、".join(f"{x.name} {_n(x.min)}単位以上" for x in sg.conditions)
     return (f"{sg.name}: 同じグループ（科目名の {sg.key_pattern} の部分が同じもの）で{_n(sg.min)}単位以上"
             f"{'（うち ' + sub + '）' if sub else ''}{_p(sg.page)}")
+
+
+def canonical(r: Rules, result: dict) -> dict:
+    """Everything the browser version must reproduce exactly (used by the parity test)."""
+    def sc(s: Scenario):
+        return {"total": round(s.total, 4),
+                "cats": {c.id: [round(s.cats[c.id].counted, 4), s.cats[c.id].problems] for c in r.walk() if c.counts},
+                "problems": problems(r, s), "dropped": dropped(s), "moved": moved(s, r),
+                "unmatched": [c.name for c in s.unmatched]}
+    g = result["gpa"]
+    return {"now": sc(result["now"]), "plan": sc(result["plan"]),
+            "gpa": [g["gpa"], g["used"], round(g["credits"], 4), len(g["skipped"])],
+            "progression": [[p["name"], p["ok"], [[n, h, m] for n, h, m in p["lines"]], q["ok"]]
+                            for p, q in zip(result["progression_now"], result["progression_plan"])],
+            "unseen": [[c.id, lab] for c, lab in result["unseen_labels"]]}
 
 
 def explain(r: Rules) -> str:
@@ -246,7 +282,17 @@ def explain(r: Rules) -> str:
     for p in r.progression:
         cats = "、".join(f"{r.by_id[k].name} {v}" for k, v in (p.get("categories") or {}).items())
         tot = f"合計 {p['min_total']}" if "min_total" in p else ""
-        L.append(f"- 進級: {p.get('name', '')} {'、'.join(x for x in (tot, cats) if x)}{_p(str(p.get('page', '')))}")
+        iy = p.get("in_year")
+        yr = f"{iy['year']}年次に{iy['min']}単位" if iy else ""
+        L.append(f"- 進級: {p.get('name', '')} {'、'.join(x for x in (tot, cats, yr) if x)}{_p(str(p.get('page', '')))}")
+    if r.ask_office:
+        L.append("")
+        L.append("学務に聞くこと（規則ファイルを作るときに分からなかった点）:")
+        L += [f"  - {a}" for a in r.ask_office]
+    if r.notes:
+        L.append("")
+        L.append("注意書き:")
+        L += [f"  - {x}" for x in r.notes]
     return "\n".join(L)
 
 

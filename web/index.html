@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>tannimap — 自分の便覧で、自分の単位を照らし合わせる</title>
+<style>
+  :root { --bg:#fbfaf7; --ink:#1f2328; --sub:#5f6368; --line:#d9d6cf; --accent:#1e6b52; --warn:#a33a1a; --card:#ffffff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --ink:#e7e9ea; --sub:#9aa0a6; --line:#33383d; --accent:#5fc49e; --warn:#ff8a65; --card:#1b1f23; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family: "Noto Sans JP","Yu Gothic UI","Hiragino Sans",sans-serif; line-height:1.6; }
+  header { padding:20px 16px 8px; max-width:1100px; margin:0 auto; }
+  h1 { font-size:1.4rem; margin:0; } h1 span { color:var(--accent); }
+  .lead { color:var(--sub); margin:4px 0 0; font-size:.95rem; }
+  main { max-width:1100px; margin:0 auto; padding:8px 16px 40px; display:grid; gap:14px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  section.wide { grid-column: 1 / -1; }
+  h2 { font-size:1rem; margin:0 0 6px; } h2 small { color:var(--sub); font-weight:normal; }
+  textarea { width:100%; min-height:180px; font-family: ui-monospace,"Cascadia Mono",Consolas,monospace; font-size:.85rem; background:transparent; color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:8px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:6px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:8px 14px; font-size:.95rem; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  input[type=file] { font-size:.85rem; color:var(--sub); }
+  pre { white-space:pre-wrap; font-family: ui-monospace,"Cascadia Mono",Consolas,"Yu Gothic UI",monospace; font-size:.85rem; margin:0; overflow-x:auto; }
+  .err { color:var(--warn); font-weight:bold; }
+  .note { color:var(--sub); font-size:.85rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>tannimap</span> — 自分の便覧で、自分の単位を照らし合わせる</h1>
+  <p class="lead">便覧の卒業要件（規則ファイル）と、ポータルの成績・履修予定を照らし合わせ、区分ごとの不足と「数に入らない単位」を、便覧のページとともに示します。成績はこの端末から外に出ません。</p>
+</header>
+<main>
+  <section class="wide">
+    <h2>1. 規則ファイル <small>（便覧から作ったもの。AI に便覧を渡して作るのが早い: リポジトリの .claude/skills/tannimap）</small></h2>
+    <textarea id="rules" spellcheck="false" placeholder='{"schema": "tannimap/1", "total": {"min": 124, "page": "12"}, "categories": [...]}'></textarea>
+    <div class="row"><input type="file" id="rulesFile" accept=".json,application/json">
+      <button class="ghost" id="explainBtn">規則を日本語で確かめる</button>
+      <button class="ghost" id="sampleBtn">見本を入れる</button></div>
+  </section>
+  <section>
+    <h2>2. 成績 <small>（CSV か、ポータルの成績表をコピーして貼り付け。科目名・区分・単位数・評価の列）</small></h2>
+    <textarea id="grades" spellcheck="false" placeholder="科目名,区分,単位数,評価,年度,学期"></textarea>
+    <div class="row"><input type="file" id="gradesFile" accept=".csv,.tsv,.txt"></div>
+  </section>
+  <section>
+    <h2>3. 履修予定 <small>（任意。評価の欄が空なら「予定」として数えます）</small></h2>
+    <textarea id="plan" spellcheck="false" placeholder="科目名,区分,単位数"></textarea>
+    <div class="row"><input type="file" id="planFile" accept=".csv,.tsv,.txt">
+      <label class="note">入学年度 <input id="entry" type="number" min="1990" max="2100" placeholder="2024" style="width:6em"></label>
+      <label class="note">在学年数（給付奨学金の目安）<input id="years" type="number" min="0" step="0.5" style="width:5em"></label></div>
+  </section>
+  <section class="wide">
+    <div class="row"><button id="checkBtn">照らし合わせる</button>
+      <span class="note">卒業・進級の判定は大学が行います。これは便覧の規則をもとにした目安です。</span></div>
+    <pre id="out"></pre>
+  </section>
+</main>
+<script id="core">
+"use strict";
+var TANNIMAP = (function () {
+  const EPS = 1e-9;
+  const PASSED = "passed", FAILED = "failed", IN_PROGRESS = "in_progress", PLANNED = "planned", WITHDRAWN = "withdrawn";
+  const STATUS_ORDER = { passed: 0, in_progress: 1, planned: 2 };
+  const SCENARIOS = { now: [PASSED], plan: [PASSED, IN_PROGRESS, PLANNED] };
+  class RulesError extends Error {}
+  class TranscriptError extends Error {}
+
+  function nfkc(s) { return String(s == null ? "" : s).normalize("NFKC"); }
+  function norm(s) { return nfkc(s).replace(/\s+/g, "").toLowerCase(); }
+  function search(p, t) { return new RegExp(nfkc(p)).test(nfkc(t)); }
+  function fmtN(x) {
+    if (Math.abs(x - Math.round(x)) < EPS) return String(Math.round(x));
+    return String(Number(x.toPrecision(6)));
+  }
+  function pyRound(x, d) {
+    const s = x * Math.pow(10, d), f = Math.floor(s);
+    if (s - f === 0.5) return (f % 2 === 0 ? f : f + 1) / Math.pow(10, d);
+    return Number(x.toFixed(d));
+  }
+
+  // ---- rules ---------------------------------------------------------------
+  function strs(v, where) {
+    if (typeof v === "string") return [v];
+    if (!Array.isArray(v) || !v.every(x => typeof x === "string")) throw new RulesError(where + ": must be a string or a list of strings");
+    return v;
+  }
+  function num(v, where, allowNull) {
+    if ((v === undefined || v === null) && allowNull) return null;
+    if (typeof v !== "number" || !isFinite(v)) throw new RulesError(where + ": must be a number");
+    if (v < 0) throw new RulesError(where + ": must not be negative");
+    return v;
+  }
+  function page(d) { return d.page == null ? "" : String(d.page); }
+  const MATCH_KEYS = ["labels", "label_patterns", "names", "name_patterns", "exclude_names", "exclude_patterns"];
+  function parseMatch(d, where) {
+    if (d === undefined || d === null) return null;
+    if (typeof d !== "object" || Array.isArray(d)) throw new RulesError(where + ": match must be an object");
+    const unknown = Object.keys(d).filter(k => !MATCH_KEYS.includes(k));
+    if (unknown.length) throw new RulesError(where + ": unknown match keys " + JSON.stringify(unknown.sort()));
+    const m = {};
+    for (const k of MATCH_KEYS) m[k] = d[k] === undefined ? [] : strs(d[k], where + "." + k);
+    for (const p of m.label_patterns.concat(m.name_patterns, m.exclude_patterns)) {
+      try { new RegExp(nfkc(p)); } catch (e) { throw new RulesError(where + ": bad pattern " + JSON.stringify(p) + ": " + e.message); }
+    }
+    if (!(m.labels.length || m.label_patterns.length || m.names.length || m.name_patterns.length))
+      throw new RulesError(where + ": match needs labels, label_patterns, names or name_patterns");
+    return m;
+  }
+  function hits(m, c) {
+    const name = norm(c.name), label = norm(c.label);
+    if (m.exclude_names.some(x => norm(x) === name)) return false;
+    if (m.exclude_patterns.some(p => search(p, c.name))) return false;
+    return (m.labels.some(x => norm(x) === label) && label !== "")
+      || m.label_patterns.some(p => search(p, c.label))
+      || m.names.some(x => norm(x) === name)
+      || m.name_patterns.some(p => search(p, c.name));
+  }
+  function conditions(lst, where) {
+    return (lst || []).map((x, i) => ({ name: String(x.name !== undefined ? x.name : "条件" + (i + 1)),
+      match: parseMatch(x.match, where + "[" + i + "]"), min: num(x.min, where + "[" + i + "].min"), page: page(x) }));
+  }
+  function sameGroup(sg, where) {
+    if (!sg) return null;
+    let pat;
+    try { pat = new RegExp(nfkc(sg.key_pattern)); } catch (e) { throw new RulesError(where + ": key_pattern missing or invalid (" + e.message + ")"); }
+    if (sg.key_pattern === undefined) throw new RulesError(where + ": key_pattern missing or invalid");
+    if (new RegExp(pat.source + "|").exec("").length - 1 < 1) throw new RulesError(where + ": key_pattern needs one (group) for the key");
+    return { name: String(sg.name !== undefined ? sg.name : "同一グループ"), key_pattern: sg.key_pattern,
+      min: num(sg.min, where + ".min"), page: page(sg), conditions: conditions(sg.conditions, where + ".conditions") };
+  }
+  const CAT_KEYS = ["id", "name", "min", "max", "overflow", "match", "counts", "required", "conditions", "limits",
+    "same_group", "alternatives", "page", "note", "term_only", "children"];
+  function category(d, where, parent) {
+    if (typeof d !== "object" || d === null || Array.isArray(d)) throw new RulesError(where + ": a category must be an object");
+    const unknown = Object.keys(d).filter(k => !CAT_KEYS.includes(k));
+    if (unknown.length) throw new RulesError(where + ": unknown keys " + JSON.stringify(unknown.sort()));
+    if (!d.id || !d.name) throw new RulesError(where + ": id and name are required");
+    where = "category " + d.id;
+    const ov = d.overflow || null;
+    const c = {
+      id: String(d.id), name: String(d.name), min: num(d.min === undefined ? 0 : d.min, where + ".min"),
+      max: num(d.max, where + ".max", true),
+      overflow_to: ov ? String(ov.to || "") : "", overflow_max: ov ? num(ov.max, where + ".overflow.max", true) : null,
+      match: parseMatch(d.match, where), counts: d.counts === undefined ? true : !!d.counts,
+      required: strs(d.required === undefined ? [] : d.required, where + ".required"),
+      page: page(d), note: String(d.note || ""), term_only: {}, parent: parent || null,
+      conditions: [], limits: [], same_group: null, alternatives: [], children: [] };
+    for (const k of Object.keys(d.term_only || {})) c.term_only[String(k)] = String(d.term_only[k]);
+    if (c.overflow_to && c.max === null) throw new RulesError(where + ": overflow needs max (the credits kept here)");
+    c.conditions = conditions(d.conditions, where + ".conditions");
+    (d.alternatives || []).forEach((x, i) => {
+      const alt = { name: String(x.name !== undefined ? x.name : "方法" + (i + 1)), page: page(x),
+        conditions: conditions(x.conditions, where + ".alternatives[" + i + "].conditions"),
+        same_group: sameGroup(x.same_group, where + ".alternatives[" + i + "].same_group") };
+      if (!alt.conditions.length && !alt.same_group) throw new RulesError(where + ".alternatives[" + i + "]: needs conditions or same_group");
+      c.alternatives.push(alt);
+    });
+    (d.limits || []).forEach((x, i) => {
+      const lo = x.overflow || null;
+      c.limits.push({ name: String(x.name !== undefined ? x.name : "上限" + (i + 1)), match: parseMatch(x.match, where + ".limits[" + i + "]"),
+        max: num(x.max, where + ".limits[" + i + "].max"), overflow_to: lo ? String(lo.to || "") : "",
+        overflow_max: lo ? num(lo.max, where + ".limits[" + i + "].overflow.max", true) : null, page: page(x) });
+    });
+    c.same_group = sameGroup(d.same_group, where + ".same_group");
+    c.children = (d.children || []).map((x, i) => category(x, where + ".children[" + i + "]", c));
+    if (!c.children.length && !c.match) throw new RulesError(where + ": a category without children needs match (which courses belong to it)");
+    return c;
+  }
+  const DEFAULT_PASS = ["S", "A+", "A", "B", "C", "秀", "優", "良", "可", "合", "合格", "認", "認定", "P"];
+  const DEFAULT_FAIL = ["D", "F", "不可", "否", "不合格", "×", "E", "X"];
+  const DEFAULT_GPA = { "S": 4, "A+": 4, "A": 3, "B": 2, "C": 1, "D": 0, "F": 0, "秀": 4, "優": 3, "良": 2, "可": 1, "不可": 0 };
+  function walk(r) { const out = []; (function rec(cs) { for (const c of cs) { out.push(c); rec(c.children); } })(r.categories); return out; }
+  function overflowEdges(r) {
+    const out = [];
+    for (const c of walk(r)) { if (c.overflow_to) out.push([c.id, c.overflow_to]); for (const l of c.limits) if (l.overflow_to) out.push([c.id, l.overflow_to]); }
+    return out;
+  }
+  function loadRules(data) {
+    if (typeof data === "string") { try { data = JSON.parse(data); } catch (e) { throw new RulesError("rules file is not valid JSON: " + e.message); } }
+    if (typeof data !== "object" || data === null || Array.isArray(data)) throw new RulesError("rules must be a JSON object");
+    if ((data.schema || "tannimap/1") !== "tannimap/1") throw new RulesError("unknown schema " + JSON.stringify(data.schema) + "; expected tannimap/1");
+    const total = data.total || {};
+    if (!("min" in total)) throw new RulesError("total.min (credits needed to graduate) is required");
+    const cats = (data.categories || []).map((x, i) => category(x, "categories[" + i + "]"));
+    if (!cats.length) throw new RulesError("categories is empty");
+    const g = data.grading || {};
+    const r = { university: String(data.university || ""), faculty: String(data.faculty || ""), entry_years: String(data.entry_years || ""),
+      total_min: num(total.min, "total.min"), total_page: page(total), categories: cats,
+      grading_pass: strs(g.pass === undefined ? DEFAULT_PASS : g.pass, "grading.pass"),
+      grading_fail: strs(g.fail === undefined ? DEFAULT_FAIL : g.fail, "grading.fail"),
+      gpa_points: g.gpa ? g.gpa : null,
+      gpa_exclude: strs(g.gpa_exclude === undefined ? ["認", "認定", "合", "合格", "P", "否", "不合格"] : g.gpa_exclude, "grading.gpa_exclude"),
+      standard_years: data.standard_years ? parseInt(data.standard_years, 10) : null,
+      progression: data.progression || [], ask_office: strs(data.ask_office === undefined ? [] : data.ask_office, "ask_office"),
+      notes: strs(data.notes === undefined ? [] : data.notes, "notes"), source: data.source || {}, by_id: {} };
+    for (const c of walk(r)) { if (r.by_id[c.id]) throw new RulesError("duplicate category id " + JSON.stringify(c.id)); r.by_id[c.id] = c; }
+    for (const c of walk(r)) {
+      const targets = [[c.overflow_to, "category " + c.id + ".overflow"]].concat(c.limits.map(l => [l.overflow_to, "category " + c.id + ".limits[" + l.name + "].overflow"]));
+      for (const [t, where] of targets) {
+        if (t && !r.by_id[t]) throw new RulesError(where + ": no category with id " + JSON.stringify(t));
+        if (t && !r.by_id[t].counts) throw new RulesError(where + ": cannot overflow into " + JSON.stringify(t) + ", which does not count");
+      }
+    }
+    const graph = {};
+    for (const [a, b] of overflowEdges(r)) (graph[a] = graph[a] || new Set()).add(b);
+    const seen = new Set(), stack = new Set();
+    function visit(n, path) {
+      if (stack.has(n)) throw new RulesError("overflow goes round in a circle: " + path.concat([n]).join(" → "));
+      if (seen.has(n)) return;
+      stack.add(n); for (const m of (graph[n] || [])) visit(m, path.concat([n])); stack.delete(n); seen.add(n);
+    }
+    for (const n of Object.keys(graph)) visit(n, []);
+    r.progression.forEach((p, i) => {
+      const unknown = Object.keys(p).filter(k => !["name", "min_total", "categories", "in_year", "page", "note"].includes(k));
+      if (unknown.length) throw new RulesError("progression[" + i + "]: unknown keys " + JSON.stringify(unknown.sort()) + " (allowed: name, min_total, categories, in_year, page, note)");
+      for (const cid of Object.keys(p.categories || {})) if (!r.by_id[cid]) throw new RulesError("progression[" + i + "]: no category with id " + JSON.stringify(cid));
+      const iy = p.in_year;
+      if (iy !== undefined && iy !== null && (typeof iy !== "object" || !("year" in iy) || !("min" in iy))) throw new RulesError("progression[" + i + "].in_year: write {\"year\": 1, \"min\": 8} (credits earned in that year of study)");
+    });
+    return r;
+  }
+
+  // ---- transcript ----------------------------------------------------------
+  const ALIASES = {
+    name: ["科目名", "授業科目名", "授業科目", "科目", "授業名", "科目名称", "course", "coursename", "subject", "title"],
+    label: ["区分", "科目区分", "分類", "授業科目区分", "科目群", "系列", "category", "group", "type"],
+    credits: ["単位", "単位数", "修得単位", "修得単位数", "単位数(修得)", "credits", "credit", "units"],
+    grade: ["評価", "成績", "評語", "評点", "grade", "result"],
+    year: ["年度", "修得年度", "履修年度", "year"],
+    term: ["学期", "期", "開講期", "履修期", "term", "semester"],
+    status: ["状態", "ステータス", "履修状況", "status"] };
+  const IN_PROGRESS_WORDS = ["履修中", "登録済", "登録中", "受講中", "inprogress", "registered", "taking"];
+  const PLANNED_WORDS = ["予定", "計画", "履修予定", "登録予定", "plan", "planned"];
+  const WITHDRAWN_WORDS = ["放棄", "取消", "取り消し", "辞退", "w", "withdrawn", "中止"];
+  function headerMap(row) {
+    const found = {};
+    row.forEach((cell, i) => { const h = norm(cell);
+      for (const key of Object.keys(ALIASES)) { if (key in found) continue; if (ALIASES[key].some(n => h === norm(n))) found[key] = i; } });
+    return found;
+  }
+  function csvParse(text) {
+    const rows = []; let row = [], cell = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+      else if (ch === '"') q = true;
+      else if (ch === ",") { row.push(cell); cell = ""; }
+      else if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+      else cell += ch;
+    }
+    row.push(cell); rows.push(row);
+    return rows;
+  }
+  function split(text) {
+    const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(l => l.trim());
+    if (!lines.length) return [];
+    if (lines.slice(0, 20).join("\n").includes("\t")) return lines.map(l => l.split("\t"));
+    return csvParse(lines.join("\n"));
+  }
+  function status(grade, statusCell, r) {
+    const s = norm(statusCell), g = norm(grade);
+    for (const [words, st] of [[PLANNED_WORDS, PLANNED], [IN_PROGRESS_WORDS, IN_PROGRESS], [WITHDRAWN_WORDS, WITHDRAWN]]) {
+      if (s && words.some(w => norm(w) === s || s.includes(norm(w)))) return st;
+      if (g && words.some(w => norm(w) === g)) return st;
+    }
+    if (!g) return IN_PROGRESS;
+    const passes = r ? r.grading_pass.map(norm) : [], fails = r ? r.grading_fail.map(norm) : [];
+    if (fails.includes(g)) return FAILED;
+    if (passes.includes(g)) return PASSED;
+    if (/^\d+(\.\d+)?$/.test(g)) return parseFloat(g) >= 60 ? PASSED : FAILED;
+    throw new TranscriptError("unknown grade " + JSON.stringify(grade) + ": add it to grading.pass or grading.fail in the rules");
+  }
+  function parseTranscript(text, r, defaultStatus) {
+    const rows = split(nfkc(text.replace(/^﻿/, "")));
+    let headAt = null, cols = {};
+    for (let i = 0; i < Math.min(15, rows.length); i++) { const m = headerMap(rows[i]); if ("name" in m && "credits" in m) { headAt = i; cols = m; break; } }
+    if (headAt === null) throw new TranscriptError("no header row with a course name column (科目名) and a credits column (単位数) in the first 15 lines");
+    const courses = [];
+    for (let k = headAt + 1; k < rows.length; k++) {
+      const row = rows[k], n = k + 1;
+      const cell = key => { const i = cols[key]; return i !== undefined && i < row.length ? row[i].trim() : ""; };
+      const name = cell("name");
+      if (!name || ["合計", "計", "小計", "total"].includes(norm(name))) continue;
+      const raw = cell("credits");
+      if (!raw) continue;
+      if (!/^\s*[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?\s*$/.test(raw)) throw new TranscriptError("line " + n + ": credits " + JSON.stringify(raw) + " is not a number");
+      const credits = parseFloat(raw);
+      const grade = cell("grade"), st = cell("status");
+      const s = (defaultStatus === PLANNED && !grade && !st) ? PLANNED : status(grade, st, r);
+      courses.push({ name, credits, label: cell("label"), grade, status: s, year: cell("year"), term: cell("term"), row: n });
+    }
+    if (!courses.length) throw new TranscriptError("the table has a header but no course rows");
+    return courses;
+  }
+
+  // ---- engine ----------------------------------------------------------------
+  function order(r) {
+    const all = walk(r), idx = {}; all.forEach((c, i) => idx[c.id] = i);
+    const deps = {}; for (const c of all) deps[c.id] = new Set();
+    for (const c of all) for (const ch of c.children) deps[c.id].add(ch.id);
+    for (const [a, b] of overflowEdges(r)) deps[b].add(a);
+    const out = [], state = {};
+    function visit(cid, path) {
+      if (state[cid] === 2) return;
+      if (state[cid] === 1) throw new Error("categories depend on each other in a circle: " + path.concat([cid]).join(" → "));
+      state[cid] = 1;
+      for (const d of Array.from(deps[cid]).sort((x, y) => idx[x] - idx[y])) visit(d, path.concat([cid]));
+      state[cid] = 2; out.push(r.by_id[cid]);
+    }
+    for (const c of all) visit(c.id, []);
+    return out;
+  }
+  function pools(r) { const out = []; (function rec(cs) { for (const c of cs) { rec(c.children); if (c.match) out.push(c); } })(r.categories); return out; }
+  function assign(r, courses) {
+    const ps = pools(r), taken = {}, unmatched = [];
+    for (const c of walk(r)) taken[c.id] = [];
+    for (const c of courses) { const hit = ps.find(p => hits(p.match, c)); if (!hit) unmatched.push(c); else taken[hit.id].push(c); }
+    return [taken, unmatched];
+  }
+  function cmpKey(a, b) {
+    const ka = [STATUS_ORDER[a.course.status] !== undefined ? STATUS_ORDER[a.course.status] : 9, String(a.course.year), String(a.course.term), a.course.row];
+    const kb = [STATUS_ORDER[b.course.status] !== undefined ? STATUS_ORDER[b.course.status] : 9, String(b.course.year), String(b.course.term), b.course.row];
+    for (let i = 0; i < 4; i++) { if (ka[i] < kb[i]) return -1; if (ka[i] > kb[i]) return 1; }
+    return 0;
+  }
+  function shortfall(res) { return Math.max(0, res.cat.min - res.counted); }
+  function sameGroupEval(sg, items, pg) {
+    const pat = new RegExp(nfkc(sg.key_pattern)), groups = new Map();
+    for (const i of items) { const m = pat.exec(nfkc(i.course.name)); if (m) { if (!groups.has(m[1])) groups.set(m[1], []); groups.get(m[1]).push(i); } }
+    let best = null;
+    for (const [key, its] of groups) {
+      const have = its.reduce((s, i) => s + i.credits, 0);
+      const conds = sg.conditions.map(c => [c.name, its.filter(i => hits(c.match, i.course)).reduce((s, i) => s + i.credits, 0), c.min]);
+      const ok = have + EPS >= sg.min && conds.every(([, h, m]) => h + EPS >= m);
+      const missing = Math.max(0, sg.min - have) + conds.reduce((s, [, h, m]) => s + Math.max(0, m - h), 0);
+      const score = [ok ? 1 : 0, -missing, have];
+      if (best === null || cmpArr(score, best[0]) > 0) best = [score, key, have, ok, conds];
+    }
+    if (best === null) return [sg.name, null, 0, sg.min, false, [], sg.page || pg];
+    return [sg.name, best[1], best[2], sg.min, best[3], best[4], sg.page || pg];
+  }
+  function cmpArr(a, b) { for (let i = 0; i < a.length; i++) { if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
+  function alternativeEval(alt, items, pg) {
+    const conds = alt.conditions.map(c => [c.name, items.filter(i => hits(c.match, i.course)).reduce((s, i) => s + i.credits, 0), c.min, c.page || alt.page || pg]);
+    const sg = alt.same_group ? sameGroupEval(alt.same_group, items, alt.page || pg) : null;
+    const missing = conds.filter(([, h, m]) => h + EPS < m).map(([n, h, m]) => n + " " + fmtN(m - h) + "単位不足");
+    if (sg && !sg[4]) {
+      const [name, key, have, need, , sconds] = sg;
+      const lack = sconds.filter(([, h, m]) => h + EPS < m).map(([n, h, m]) => n + " " + fmtN(m - h));
+      const where = key ? "最も近い「" + key + "」で" + fmtN(have) + "単位" : "該当する科目なし";
+      missing.push(name + "（" + fmtN(need) + "単位以上）に届かない — " + where + (lack.length ? "、不足: " + lack.join("、") : ""));
+    }
+    return { name: alt.name, ok: !missing.length, missing, page: alt.page || pg,
+      progress: conds.reduce((s, [, h]) => s + h, 0) + (sg ? sg[2] : 0) };
+  }
+  function reqHit(req, c) {
+    if (req.startsWith("re:")) return new RegExp(nfkc(req.slice(3))).test(nfkc(c.name));
+    return norm(req) === norm(c.name);
+  }
+  function checkCat(cat, res, all, keep) {
+    for (const cond of cat.conditions)
+      res.conditions.push([cond.name, res.items.filter(i => hits(cond.match, i.course)).reduce((s, i) => s + i.credits, 0), cond.min, cond.page || cat.page]);
+    if (cat.same_group) res.same_group = sameGroupEval(cat.same_group, res.items, cat.page);
+    if (cat.alternatives.length) res.alternatives = cat.alternatives.map(a => alternativeEval(a, res.items, cat.page));
+    for (const req of cat.required) {
+      const hitItem = res.items.find(i => reqHit(req, i.course));
+      if (hitItem) {
+        const h = hitItem.course;
+        let note = h.status === PASSED ? "" : (h.status === IN_PROGRESS ? "履修中" : "予定のみ");
+        if (!(keep.length === 1 && keep[0] === PASSED) && keep.includes(h.status)) note = "";
+        res.required.push([req, h, note]); continue;
+      }
+      const later = all.find(c => reqHit(req, c) && (c.status === IN_PROGRESS || c.status === PLANNED));
+      const failed = all.find(c => reqHit(req, c) && (c.status === FAILED || c.status === WITHDRAWN));
+      if (later) res.required.push([req, null, later.status === IN_PROGRESS ? "履修中（まだ修得していない）" : "予定のみ（まだ登録していない）"]);
+      else if (failed) res.required.push([req, null, "不合格のまま（再履修が必要）"]);
+      else res.required.push([req, null, "未修得・未登録"]);
+    }
+  }
+  function problemItems(res) {
+    const out = [], sf = shortfall(res);
+    if (res.cat.counts && sf > EPS && sf > res.child_shortfall + EPS) out.push(["short", fmtN(sf) + "単位不足"]);
+    for (const [n, h, m] of res.conditions) if (h + EPS < m) out.push(["cond:" + n, n + ": " + fmtN(m - h) + "単位不足"]);
+    if (res.same_group && !res.same_group[4]) {
+      const [name, key, have, need, , conds] = res.same_group;
+      const where = key ? "最も近い「" + key + "」で" + fmtN(have) + "単位" : "該当する科目なし";
+      const lack = conds.filter(([, h, m]) => h + EPS < m).map(([n, h, m]) => n + " " + fmtN(m - h) + "単位").join("、");
+      out.push(["group", name + "（" + fmtN(need) + "単位以上）を満たしていない — " + where + (lack ? "、不足: " + lack : "")]);
+    }
+    if (res.alternatives.length && !res.alternatives.some(a => a.ok)) {
+      let best = res.alternatives[0];
+      for (const a of res.alternatives) if (cmpArr([a.progress, -a.missing.length], [best.progress, -best.missing.length]) > 0) best = a;
+      const others = res.alternatives.filter(a => a !== best).map(a => a.name);
+      out.push(["alt", "どの方法も満たしていない。最も近いのは「" + best.name + "」で、" + best.missing.join("；") + (others.length ? "（ほかの方法: " + others.join("・") + "）" : "")]);
+    }
+    for (const [req, c, note] of res.required) if (c === null || note) out.push(["req:" + req, "必修「" + req + "」が" + note]);
+    return out;
+  }
+  function runScenario(r, courses, name) {
+    const keep = SCENARIOS[name];
+    const pool = courses.filter(c => keep.includes(c.status) && c.credits > 0);
+    const [taken, unmatched] = assign(r, pool);
+    const incoming = {}; for (const c of walk(r)) incoming[c.id] = [];
+    const results = {}, notCounted = [];
+    for (const cat of order(r)) {
+      const res = { cat, counted: 0, items: [], dropped: [], moved_out: [], conditions: [], same_group: null, required: [], alternatives: [], child_shortfall: 0 };
+      results[cat.id] = res;
+      if (!cat.counts) { for (const c of taken[cat.id]) notCounted.push([c, cat]); continue; }
+      let items = [];
+      for (const ch of cat.children) if (results[ch.id].cat.counts) items = items.concat(results[ch.id].items.map(i => ({ course: i.course, credits: i.credits, via: i.via })));
+      items = items.concat(taken[cat.id].map(c => ({ course: c, credits: c.credits, via: "" })), incoming[cat.id]);
+      items.sort(cmpKey);
+      const used = cat.limits.map(() => 0), moved = cat.limits.map(() => 0);
+      let movedMax = 0;
+      for (const it of items) {
+        let room = it.credits, binding = null;
+        cat.limits.forEach((lim, li) => { if (hits(lim.match, it.course)) { const left = lim.max - used[li]; if (left < room - EPS) { room = Math.max(0, left); binding = li; } } });
+        if (cat.max !== null) { const left = cat.max - res.counted; if (left < room - EPS) { room = Math.max(0, left); binding = "cat"; } }
+        const take = Math.min(it.credits, room);
+        if (take > EPS) {
+          res.items.push({ course: it.course, credits: take, via: it.via });
+          res.counted += take;
+          cat.limits.forEach((lim, li) => { if (hits(lim.match, it.course)) used[li] += take; });
+        }
+        const rest = it.credits - take;
+        if (rest <= EPS) continue;
+        let to, cap, pg, why, already;
+        if (binding === "cat") { to = cat.overflow_to; cap = cat.overflow_max; pg = cat.page; why = cat.name + "は" + fmtN(cat.max) + "単位までしか算入されない"; already = movedMax; }
+        else { const b = cat.limits[binding]; to = b.overflow_to; cap = b.overflow_max; pg = b.page || cat.page; why = cat.name + "のうち「" + b.name + "」は" + fmtN(b.max) + "単位まで"; already = moved[binding]; }
+        let send = 0;
+        if (to) {
+          send = cap === null ? rest : Math.max(0, Math.min(rest, cap - already));
+          if (send > EPS) {
+            incoming[to].push({ course: it.course, credits: send, via: cat.id });
+            res.moved_out.push([to, send, it.course]);
+            if (binding === "cat") movedMax += send; else moved[binding] += send;
+          }
+        }
+        const lost = rest - send;
+        if (lost > EPS) {
+          const tail = (to && cap !== null) ? "（" + r.by_id[to].name + "へは" + fmtN(cap) + "単位まで）" : "";
+          res.dropped.push({ course: it.course, credits: lost, reason: why + tail + "。卒業単位に含まれない", page: pg });
+        }
+      }
+      checkCat(cat, res, courses, keep);
+      res.child_shortfall = cat.children.filter(ch => ch.counts).reduce((s, ch) => s + shortfall(results[ch.id]), 0);
+    }
+    const total = r.categories.filter(c => c.counts).reduce((s, c) => s + results[c.id].counted, 0);
+    return { name, cats: results, total, unmatched, not_counted: notCounted };
+  }
+  function gpa(r, courses) {
+    if (!r.gpa_points) return { gpa: null, points: 0, credits: 0, used: 0, skipped: [], no_scale: true };
+    const pts = {}; for (const k of Object.keys(r.gpa_points)) pts[norm(k)] = Number(r.gpa_points[k]);
+    const excl = new Set(r.gpa_exclude.map(norm));
+    let n = 0, d = 0; const used = [], skipped = [];
+    for (const c of courses) {
+      if (!(c.status === PASSED || c.status === FAILED) || c.credits <= 0) continue;
+      const g = norm(c.grade);
+      if (excl.has(g) || !(g in pts)) { skipped.push(c); continue; }
+      n += pts[g] * c.credits; d += c.credits; used.push(c);
+    }
+    return { gpa: d ? pyRound(n / d, 2) : null, points: n, credits: d, used: used.length, skipped: skipped.map(c => [c.name, c.grade]) };
+  }
+  function yearOfStudy(c, entryYear) {
+    if (!entryYear) return null;
+    const y = parseInt(String(c.year).trim().slice(0, 4), 10);
+    return /^\d+$/.test(String(c.year).trim().slice(0, 4)) ? y - entryYear + 1 : null;
+  }
+  function progression(r, sc, courses, entryYear, keep) {
+    return r.progression.map(p => {
+      const lines = [];
+      if ("min_total" in p) lines.push(["合計（卒業単位に数える単位）", sc.total, Number(p.min_total)]);
+      for (const cid of Object.keys(p.categories || {})) lines.push([r.by_id[cid].name, sc.cats[cid].counted, Number(p.categories[cid])]);
+      const iy = p.in_year;
+      if (iy) {
+        const year = parseInt(iy.year, 10), need = Number(iy.min), label = year + "年次に修得した単位";
+        if (!entryYear) lines.push([label + "（入学年度が必要）", null, need]);
+        else lines.push([label, courses.filter(c => keep.includes(c.status) && yearOfStudy(c, entryYear) === year).reduce((s, c) => s + c.credits, 0), need]);
+      }
+      const ok = lines.some(([, h]) => h === null) ? null : lines.every(([, h, m]) => h + EPS >= m);
+      return { name: String(p.name !== undefined ? p.name : "進級要件"), page: String(p.page !== undefined ? p.page : ""), note: String(p.note || ""), lines, ok };
+    });
+  }
+  function unseenLabels(r, courses) {
+    const seen = new Set(courses.filter(c => c.label).map(c => norm(c.label))), out = [];
+    for (const cat of walk(r)) { if (!cat.match) continue; for (const lab of cat.match.labels) if (!seen.has(norm(lab))) out.push([cat, lab]); }
+    return out;
+  }
+  function jasso(r, courses, now, years) {
+    if (!(r.standard_years && years)) return null;
+    const standard = r.total_min / r.standard_years * years;
+    const earnedAll = courses.filter(c => c.status === PASSED).reduce((s, c) => s + c.credits, 0);
+    const out = { standard, counted: now.total, earned_all: earnedAll };
+    for (const [key, have] of [["counted", now.total], ["earned_all", earnedAll]]) {
+      const ratio = standard ? have / standard : 0;
+      out[key + "_ratio"] = ratio;
+      out[key + "_level"] = ratio <= 0.6 + EPS ? "廃止の基準（6割以下）" : ratio <= 0.7 + EPS ? "警告の基準（7割以下）" : "基準より上";
+    }
+    return out;
+  }
+  function check(r, courses, years, entryYear) {
+    const now = runScenario(r, courses, "now"), plan = runScenario(r, courses, "plan");
+    return { now, plan, gpa: gpa(r, courses),
+      progression_now: progression(r, now, courses, entryYear || null, SCENARIOS.now),
+      progression_plan: progression(r, plan, courses, entryYear || null, SCENARIOS.plan),
+      jasso: jasso(r, courses, now, years), unseen_labels: unseenLabels(r, courses) };
+  }
+
+  // ---- report ----------------------------------------------------------------
+  const DISCLAIMER = "これは便覧の規則をもとにした目安です。卒業・進級の判定は大学（教授会）が行います。気になる点は「学務に聞くこと」を持って学務・指導教員に確認してください。";
+  function w(s) { let n = 0; for (const ch of s) n += /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦　-〾ぁ-㏿]/.test(ch) ? 2 : 1; return n; }
+  function pad(s, n) { return s + " ".repeat(Math.max(0, n - w(s))); }
+  function pp(pg) { return !pg ? "" : /^[0-9]/.test(pg) ? "（p." + pg + "）" : "（" + pg + "）"; }
+  function okText(ok) { return ok === null ? "判定できない" : ok ? "満たしている" : "満たしていない"; }
+  function inProgression(r, c) { return r.progression.some(p => c.id in (p.categories || {})); }
+  function depth(c) { let d = 0; while (c.parent) { d++; c = c.parent; } return d; }
+  function title(r) {
+    const who = [r.university, r.faculty].filter(Boolean).join(" ");
+    return who + (r.entry_years ? "（" + r.entry_years + "入学）" : "") + "  卒業に必要な単位 " + fmtN(r.total_min) + pp(r.total_page);
+  }
+  function problemList(r, sc) {
+    const out = [];
+    for (const c of walk(r)) {
+      if (!c.counts) continue;
+      for (const [key, p] of problemItems(sc.cats[c.id])) {
+        const extra = key.startsWith("req:") && (key.slice(4) in c.term_only) ? "　※" + c.term_only[key.slice(4)] : "";
+        out.push([c.id + "/" + key, c.name + ": " + p + pp(c.page) + extra]);
+      }
+    }
+    if (r.total_min - sc.total > EPS) out.push(["total", "合計: " + fmtN(r.total_min - sc.total) + "単位不足" + pp(r.total_page)]);
+    return out;
+  }
+  function droppedList(sc) {
+    const out = [];
+    for (const res of Object.values(sc.cats)) for (const d of res.dropped) {
+      const tag = d.course.status === IN_PROGRESS ? "（履修中）" : d.course.status === PLANNED ? "（予定）" : "";
+      out.push(d.course.name + tag + " " + fmtN(d.credits) + "単位: " + d.reason + pp(d.page));
+    }
+    for (const [c, cat] of sc.not_counted) out.push(c.name + " " + fmtN(c.credits) + "単位: 「" + cat.name + "」は卒業単位に含まれない" + (cat.note ? "。" + cat.note : "") + pp(cat.page));
+    return out;
+  }
+  function movedList(sc, r) {
+    const out = [];
+    for (const res of Object.values(sc.cats)) for (const [to, cr, course] of res.moved_out)
+      out.push(course.name + " " + fmtN(cr) + "単位: " + res.cat.name + "の超過分として「" + r.by_id[to].name + "」に算入" + pp(res.cat.page));
+    return out;
+  }
+  function textReport(r, result, courses) {
+    const now = result.now, plan = result.plan, L = [title(r), ""];
+    const nProg = courses.filter(c => c.status === IN_PROGRESS).length, nPlan = courses.filter(c => c.status === PLANNED).length;
+    L.push("修得済 " + courses.filter(c => c.status === PASSED).length + "科目・履修中 " + nProg + "科目・予定 " + nPlan + "科目を読みました。", "");
+    const rows = [["区分", "必要", "修得済", "予定込み", "不足(予定込み)"]];
+    for (const c of walk(r)) {
+      const name = "  ".repeat(depth(c)) + c.name + (c.counts ? "" : "（算入されない）");
+      if (!c.counts) { rows.push([name, "-", "-", fmtN(plan.not_counted.filter(([, cat]) => cat.id === c.id).reduce((s, [x]) => s + x.credits, 0)), "-"]); continue; }
+      const a = now.cats[c.id], b = plan.cats[c.id];
+      const need = fmtN(c.min) + (c.max !== null && c.max !== c.min ? "〜" + fmtN(c.max) : "");
+      rows.push([name, need, fmtN(a.counted), fmtN(b.counted), shortfall(b) > EPS ? fmtN(shortfall(b)) : "0"]);
+    }
+    rows.push(["合計", fmtN(r.total_min), fmtN(now.total), fmtN(plan.total), fmtN(Math.max(0, r.total_min - plan.total))]);
+    const widths = [0, 1, 2, 3, 4].map(i => Math.max(...rows.map(row => w(row[i]))));
+    rows.forEach((row, k) => {
+      L.push(row.map((x, i) => i === 0 ? pad(x, widths[0]) : " ".repeat(widths[i] - w(x)) + x).join("  "));
+      if (k === 0) L.push("-".repeat(widths.reduce((s, x) => s + x, 0) + 8));
+    });
+    L.push("");
+    const itemsNow = problemList(r, now), itemsPlan = problemList(r, plan);
+    L.push(nProg || nPlan ? "■ 予定どおり修得しても残る問題" : "■ 足りないもの");
+    if (itemsPlan.length) for (const [, p] of itemsPlan) L.push("  ! " + p); else L.push("  （なし）");
+    if (nProg || nPlan) {
+      const keys = new Set(itemsPlan.map(([k]) => k)), solved = itemsNow.filter(([k]) => !keys.has(k));
+      if (solved.length) { L.push("", "■ 今は足りないが、履修中・予定の科目を修得すれば解消するもの"); for (const [, p] of solved) L.push("  - " + p); }
+    }
+    const mv = movedList(plan, r);
+    if (mv.length) { L.push("", "■ 別の区分に振り替えて数えた単位"); for (const x of mv) L.push("  - " + x); }
+    const dr = droppedList(plan);
+    if (dr.length) { L.push("", "■ 卒業単位に含まれない単位（修得しても数に入らない）"); for (const x of dr) L.push("  - " + x); }
+    if (plan.unmatched.length) { L.push("", "■ 規則にない区分の科目（どこに数えるか不明。学務に確認）"); for (const c of plan.unmatched) L.push("  ? " + c.name + "（区分: " + (c.label || "空欄") + "）" + fmtN(c.credits) + "単位"); }
+    const important = (result.unseen_labels || []).filter(([c]) => c.min > 0 || inProgression(r, c));
+    if (important.length) { L.push("", "■ 成績表に一度も出てこない区分名（名前が実際と違うと、その区分は黙って0単位になる。成績表の表記と見比べる）"); for (const [c, lab] of important) L.push("  ? 「" + lab + "」（" + c.name + "）"); }
+    const g = result.gpa; L.push("");
+    if (g.no_scale) L.push("■ GPA: 規則に評語ごとの点数（grading.gpa）がないので計算していません");
+    else if (g.gpa !== null) L.push("■ GPA " + g.gpa.toFixed(2) + "（" + g.used + "科目・" + fmtN(g.credits) + "単位で計算" + (g.skipped.length ? "、" + g.skipped.length + "科目は評価が数値にならないため除外" : "") + "）");
+    const hasPlan = !!(nProg || nPlan);
+    result.progression_now.forEach((p, i) => {
+      const q = result.progression_plan[i];
+      L.push("■ " + p.name + ": " + okText(p.ok) + "（修得済）" + (hasPlan ? "／" + okText(q.ok) + "（予定込み）" : "") + pp(p.page) + (p.note ? "　" + p.note : ""));
+      const src = hasPlan ? q : p;
+      L.push("    " + src.lines.map(([n, h, m]) => n + " " + (h === null ? "?" : fmtN(h)) + "/" + fmtN(m)).join("、") + (hasPlan ? "（予定込み）" : ""));
+    });
+    const j = result.jasso;
+    if (j) L.push("■ 給付奨学金の単位の基準（目安）: 標準 " + fmtN(pyRound(j.standard, 1)) + "単位に対し、卒業単位に数えた修得 " + fmtN(j.counted) + "単位（" + Math.round(j.counted_ratio * 100) + "%・" + j.counted_level + "）、修得した全単位 " + fmtN(j.earned_all) + "単位（" + Math.round(j.earned_all_ratio * 100) + "%・" + j.earned_all_level + "）。GPAの順位と出席率は大学のデータが必要なので判定していません。");
+    const asks = r.ask_office.slice();
+    if (plan.unmatched.length) asks.push("規則にない区分の科目（上の「?」）が、どの区分に数えられるか");
+    if (Object.values(plan.cats).some(res => res.dropped.length)) asks.push("「卒業単位に含まれない」とした単位の扱いが、この理解で正しいか");
+    if (asks.length) { L.push("", "■ 学務に聞くこと"); for (const a of asks) L.push("  - " + a); }
+    if (r.notes.length) { L.push("", "■ 便覧の注意書き"); for (const x of r.notes) L.push("  - " + x); }
+    L.push("", DISCLAIMER);
+    return L.join("\n");
+  }
+  function canonical(r, result) {
+    const rd = x => Math.round(x * 1e4) / 1e4;
+    const sc = s => {
+      const cats = {}; for (const c of walk(r)) if (c.counts) cats[c.id] = [rd(s.cats[c.id].counted), problemItems(s.cats[c.id]).map(([, t]) => t)];
+      return { total: rd(s.total), cats, problems: problemList(r, s).map(([, t]) => t), dropped: droppedList(s), moved: movedList(s, r), unmatched: s.unmatched.map(c => c.name) };
+    };
+    const g = result.gpa;
+    return { now: sc(result.now), plan: sc(result.plan), gpa: [g.gpa, g.used, rd(g.credits), g.skipped.length],
+      progression: result.progression_now.map((p, i) => [p.name, p.ok, p.lines.map(([n, h, m]) => [n, h, m]), result.progression_plan[i].ok]),
+      unseen: result.unseen_labels.map(([c, lab]) => [c.id, lab]) };
+  }
+  return { loadRules, parseTranscript, check, textReport, canonical, RulesError, TranscriptError, PLANNED };
+})();
+</script>
+<script>
+"use strict";
+(function () {
+  const $ = id => document.getElementById(id);
+  function decode(buf) {
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+    catch (e) { return new TextDecoder("shift_jis").decode(buf); }
+  }
+  for (const [file, area] of [["rulesFile", "rules"], ["gradesFile", "grades"], ["planFile", "plan"]]) {
+    $(file).addEventListener("change", async ev => {
+      const f = ev.target.files[0]; if (!f) return;
+      $(area).value = decode(await f.arrayBuffer());
+    });
+  }
+  function show(text, isError) { $("out").textContent = text; $("out").className = isError ? "err" : ""; }
+  $("checkBtn").addEventListener("click", () => {
+    try {
+      const r = TANNIMAP.loadRules($("rules").value);
+      let courses = TANNIMAP.parseTranscript($("grades").value, r);
+      if ($("plan").value.trim()) courses = courses.concat(TANNIMAP.parseTranscript($("plan").value, r, TANNIMAP.PLANNED));
+      const years = parseFloat($("years").value) || null, entry = parseInt($("entry").value, 10) || null;
+      show(TANNIMAP.textReport(r, TANNIMAP.check(r, courses, years, entry), courses), false);
+    } catch (e) { show("エラー: " + e.message, true); }
+  });
+  $("explainBtn").addEventListener("click", () => {
+    try {
+      const r = TANNIMAP.loadRules($("rules").value);
+      const L = [];
+      (function rec(cs, d) {
+        for (const c of cs) {
+          const ind = "  ".repeat(d);
+          if (!c.counts) { L.push(ind + "- " + c.name + ": 卒業単位に含まれない" + (c.page ? "（p." + c.page + "）" : "")); continue; }
+          const parts = [c.min ? c.min + "単位以上" : "最低単位なし"];
+          if (c.max !== null) parts.push("算入は" + c.max + "単位まで");
+          if (c.overflow_to) parts.push("超過分は「" + r.by_id[c.overflow_to].name + "」へ" + (c.overflow_max !== null ? "（" + c.overflow_max + "単位まで）" : ""));
+          L.push(ind + "- " + c.name + ": " + parts.join("、") + (c.page ? "（p." + c.page + "）" : ""));
+          for (const x of c.required) L.push(ind + "    必修: " + x + (c.term_only[x] ? "（" + c.term_only[x] + "）" : ""));
+          for (const x of c.conditions) L.push(ind + "    条件: " + x.name + " " + x.min + "単位以上");
+          for (const x of c.limits) L.push(ind + "    上限: " + x.name + "は" + x.max + "単位まで");
+          c.alternatives.forEach((a, k) => L.push(ind + "    方法" + (k + 1) + ": " + a.name));
+          rec(c.children, d + 1);
+        }
+      })(r.categories, 0);
+      show("卒業に必要な単位 " + r.total_min + (r.total_page ? "（p." + r.total_page + "）" : "") + "\n\n" + L.join("\n"), false);
+    } catch (e) { show("エラー: " + e.message, true); }
+  });
+  $("sampleBtn").addEventListener("click", () => {
+    $("rules").value = JSON.stringify({ schema: "tannimap/1", university: "見本大学", faculty: "見本学部", entry_years: "2024年度",
+      total: { min: 20, page: "3" }, categories: [
+        { id: "kyoyo", name: "教養科目", min: 6, page: "3", match: { labels: ["教養"] } },
+        { id: "eigo", name: "英語", min: 2, max: 4, overflow: { to: "jiyu", max: 1 }, page: "3", match: { labels: ["英語"] } },
+        { id: "senmon", name: "専門科目", min: 10, page: "4", match: { labels: ["専門"] }, required: ["卒業研究"], term_only: { "卒業研究": "春学期のみ登録可" } },
+        { id: "jiyu", name: "自由科目", max: 4, page: "5", match: { labels: ["自由"] } },
+        { id: "kyoshoku", name: "教職科目", counts: false, page: "5", match: { labels: ["教職"] } }] }, null, 2);
+    $("grades").value = "科目名,区分,単位数,評価\n哲学,教養,2,A\n英語I,英語,2,B\n英語II,英語,2,A\n英語III,英語,2,A\n専門基礎,専門,4,A\n教育原理,教職,2,A\n統計学,専門,2,F";
+    $("plan").value = "科目名,区分,単位数\n社会学,教養,2\n専門応用,専門,4";
+  });
+})();
+</script>
+</body>
+</html>

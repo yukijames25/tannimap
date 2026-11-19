@@ -5,6 +5,8 @@
     tannimap validate rules.json         # errors and suspicious points in a rules file
     tannimap template rules              # an empty rules file to fill in
     tannimap template grades             # a grades table to fill in
+
+Exit codes: 0 = no problems found, 1 = something is short or unclear (the report says what), 2 = error.
 """
 from __future__ import annotations
 
@@ -38,7 +40,8 @@ RULES_TEMPLATE = {
         {"id": "jiyu", "name": "自由科目", "min": 0, "max": 20, "page": "15", "match": {"labels": ["自由"]}},
         {"id": "kyoshoku", "name": "教職科目", "counts": False, "page": "16", "match": {"labels": ["教職"]}},
     ],
-    "progression": [{"name": "3年→4年", "min_total": 90, "page": "17"}],
+    "progression": [{"name": "1年→2年", "in_year": {"year": 1, "min": 8}, "page": "17"},
+                    {"name": "3年→4年", "min_total": 90, "categories": {"senmon": 30}, "page": "17"}],
     "ask_office": [],
     "notes": [],
 }
@@ -69,6 +72,7 @@ def main(argv=None) -> int:
     p.add_argument("grades", help="成績表（CSV / TSV / ポータルからコピーした表）")
     p.add_argument("--plan", action="append", default=[], help="履修予定の表（評価欄が空なら予定として読む）")
     p.add_argument("--years", type=float, help="在学年数（給付奨学金の単位の基準を目安で出す）")
+    p.add_argument("--entry-year", type=int, help="入学年度（例 2024）。「1年次に8単位」のような年次ごとの要件を判定する")
     p.add_argument("--format", choices=["text", "md", "json"], default="text")
     p = sub.add_parser("explain", help="規則を日本語で言い直す（便覧と見比べて確かめる）")
     p.add_argument("rules")
@@ -94,7 +98,7 @@ def main(argv=None) -> int:
         courses = parse_transcript(_read(a.grades), rules)
         for path in a.plan:
             courses += parse_transcript(_read(path), rules, default_status=PLANNED)
-        result = check(rules, courses, a.years)
+        result = check(rules, courses, a.years, a.entry_year)
         if a.format == "json":
             print(json.dumps(json_report(rules, result), ensure_ascii=False, indent=2))
         else:
