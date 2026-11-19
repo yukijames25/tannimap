@@ -222,8 +222,9 @@ var TANNIMAP = (function () {
     }
     for (const n of Object.keys(graph)) visit(n, []);
     r.progression.forEach((p, i) => {
-      const unknown = Object.keys(p).filter(k => !["name", "min_total", "categories", "in_year", "page", "note"].includes(k));
-      if (unknown.length) throw new RulesError("progression[" + i + "]: unknown keys " + JSON.stringify(unknown.sort()) + " (allowed: name, min_total, categories, in_year, page, note)");
+      const unknown = Object.keys(p).filter(k => !["name", "min_total", "categories", "in_year", "required", "page", "note"].includes(k));
+      if (unknown.length) throw new RulesError("progression[" + i + "]: unknown keys " + JSON.stringify(unknown.sort()) + " (allowed: name, min_total, categories, in_year, required, page, note)");
+      strs(p.required === undefined ? [] : p.required, "progression[" + i + "].required");
       for (const cid of Object.keys(p.categories || {})) if (!r.by_id[cid]) throw new RulesError("progression[" + i + "]: no category with id " + JSON.stringify(cid));
       const iy = p.in_year;
       if (iy !== undefined && iy !== null && (typeof iy !== "object" || !("year" in iy) || !("min" in iy))) throw new RulesError("progression[" + i + "].in_year: write {\"year\": 1, \"min\": 8} (credits earned in that year of study)");
@@ -499,6 +500,10 @@ var TANNIMAP = (function () {
         if (!entryYear) lines.push([label + "（入学年度が必要）", null, need]);
         else lines.push([label, courses.filter(c => keep.includes(c.status) && yearOfStudy(c, entryYear) === year).reduce((s, c) => s + c.credits, 0), need]);
       }
+      for (const req of (p.required || [])) {
+        const got = courses.some(c => reqHit(req, c) && keep.includes(c.status));
+        lines.push(["「" + (req.startsWith("re:") ? req.slice(3) : req) + "」", got ? 1 : 0, 1]);
+      }
       const ok = lines.some(([, h]) => h === null) ? null : lines.every(([, h, m]) => h + EPS >= m);
       return { name: String(p.name !== undefined ? p.name : "進級要件"), page: String(p.page !== undefined ? p.page : ""), note: String(p.note || ""), lines, ok };
     });
@@ -618,7 +623,7 @@ var TANNIMAP = (function () {
       const q = result.progression_plan[i];
       L.push("■ " + p.name + ": " + okText(p.ok) + "（修得済）" + (hasPlan ? "／" + okText(q.ok) + "（予定込み）" : "") + pp(p.page) + (p.note ? "　" + p.note : ""));
       const src = hasPlan ? q : p;
-      L.push("    " + src.lines.map(([n, h, m]) => n + " " + (h === null ? "?" : fmtN(h)) + "/" + fmtN(m)).join("、") + (hasPlan ? "（予定込み）" : ""));
+      L.push("    " + src.lines.map(([n, h, m]) => n.startsWith("「") ? n + " " + (h && h >= m ? "修得" : "未修得") : n + " " + (h === null ? "?" : fmtN(h)) + "/" + fmtN(m)).join("、") + (hasPlan ? "（予定込み）" : ""));
     });
     const j = result.jasso;
     if (j) L.push("■ 給付奨学金の単位の基準（目安）: 標準 " + fmtN(pyRound(j.standard, 1)) + "単位に対し、卒業単位に数えた修得 " + fmtN(j.counted) + "単位（" + Math.round(j.counted_ratio * 100) + "%・" + j.counted_level + "）、修得した全単位 " + fmtN(j.earned_all) + "単位（" + Math.round(j.earned_all_ratio * 100) + "%・" + j.earned_all_level + "）。GPAの順位と出席率は大学のデータが必要なので判定していません。");

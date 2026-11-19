@@ -1,0 +1,69 @@
+{
+  "schema": "tannimap/1",
+  "university": "熊本県立大学",
+  "faculty": "総合管理学部",
+  "entry_years": "令和5年度（2023年度）",
+  "source": {
+    "title": "総合管理学部 進級の要件・卒業の要件（令和5年度入学者）",
+    "url": "https://www.pu-kumamoto.ac.jp/sys/wp-content/uploads/2023/05/sinkyuyouken_sougoukanrigakubu.pdf",
+    "checked": "2026-11-20",
+    "note": "PDF の1ページ目が進級の要件・他学部開講科目、2ページ目が卒業の要件。区分名（labels）はテスト用の成績表に合わせたもの"
+  },
+  "total": {"min": 127, "page": "2"},
+  "standard_years": 4,
+  "grading": {"pass": ["秀", "優", "良", "可", "認定"], "fail": ["不可"]},
+  "categories": [
+    {"id": "kyoshoku", "name": "教職関連科目群", "counts": false, "page": "2", "match": {"labels": ["教職関連"]},
+     "note": "カ: 教職関連科目群科目の単位は卒業要件に含まれない"},
+    {"id": "kanren", "name": "関連科目（日本史・世界史・地理・地誌・職業指導）", "counts": false, "page": "2",
+     "match": {"labels": ["関連科目"]}, "note": "カ: 自由科目とし、卒業要件には含めない"},
+    {"id": "kyotsu", "name": "共通科目群", "min": 30, "page": "2",
+     "note": "a: 必修14・選択必修14のほかに、共通科目群の選択科目から2単位（その他の単位）、合計30単位以上",
+     "children": [
+      {"id": "eigo", "name": "英語I〜VI（必修）", "min": 6, "page": "2", "match": {"names": ["英語I", "英語II", "英語III", "英語IV", "英語V", "英語VI"]},
+       "required": ["英語I", "英語II", "英語III", "英語IV", "英語V", "英語VI"]},
+      {"id": "gaikoku", "name": "英語以外の外国語・英語I〜VI以外の英語科目", "min": 2, "page": "2", "match": {"labels": ["外国語"]}},
+      {"id": "health", "name": "健康スポーツ科学", "min": 2, "page": "2", "match": {"labels": ["健康スポーツ科学"]}},
+      {"id": "joho", "name": "情報処理とデータサイエンス", "min": 6, "page": "2", "match": {"labels": ["情報処理とデータサイエンス"]},
+       "required": ["情報処理入門", "データサイエンス入門", "データサイエンス演習"]},
+      {"id": "career", "name": "キャリアデザイン", "min": 2, "page": "2", "match": {"labels": ["キャリアデザイン"]},
+       "required": ["プレゼミナール", "キャリア形成論"]},
+      {"id": "moyaisuto", "name": "もやいすとジュニア育成（地域・防災から1科目）", "min": 2, "page": "2",
+       "match": {"names": ["もやいすと（地域）ジュニア育成", "もやいすと（防災）ジュニア育成"]}},
+      {"id": "shinkumamoto", "name": "新熊本学（4科目から1科目）", "min": 2, "page": "2", "match": {"name_patterns": ["^新熊本学"]}},
+      {"id": "chiiki_other", "name": "地域理解とリーダーシップ（その他）", "page": "2", "match": {"labels": ["地域理解とリーダーシップ"]},
+       "note": "j: その他の単位に含むことができる"},
+      {"id": "k", "name": "教養 人間と文化", "min": 2, "page": "2", "match": {"labels": ["教養（人間と文化）"]}},
+      {"id": "l", "name": "教養 自然と環境", "min": 2, "page": "2", "match": {"labels": ["教養（自然と環境）"]}},
+      {"id": "m", "name": "教養 社会と世界", "min": 2, "page": "2", "match": {"labels": ["教養（社会と世界）"]}}
+    ]},
+    {"id": "senmon", "name": "専門科目群", "min": 97, "page": "2", "children": [
+      {"id": "kikan_bunya", "name": "基幹科目（分野別）", "min": 30, "page": "2",
+       "match": {"labels": ["基幹（公共・福祉）", "基幹（情報）", "基幹（ビジネス）"],
+                 "names": ["基礎総合管理実践", "基礎総合管理実践演習"]},
+       "conditions": [
+         {"name": "公共・福祉分野", "min": 4, "match": {"labels": ["基幹（公共・福祉）"]}},
+         {"name": "情報分野", "min": 4, "match": {"labels": ["基幹（情報）"]}},
+         {"name": "ビジネス分野", "min": 4, "match": {"labels": ["基幹（ビジネス）"]}}],
+       "note": "エ: 基礎総合管理実践・基礎総合管理実践演習の単位は、基幹科目（分野別）に加えることができる"},
+      {"id": "kiso", "name": "基礎総合管理科目", "min": 5, "page": "2", "match": {"labels": ["基礎総合管理"]},
+       "required": ["基礎総合管理学I", "基礎総合管理学II", "基礎総合管理学演習"]},
+      {"id": "kikan_kyotsu", "name": "基幹科目（共通）", "min": 16, "page": "2", "match": {"labels": ["基幹（共通）"]}},
+      {"id": "tenkai", "name": "展開科目", "min": 34, "page": "2",
+       "match": {"labels": ["展開（地域）", "展開（グローバル）", "展開", "他学部開講"]},
+       "conditions": [
+         {"name": "展開科目（地域）", "min": 4, "match": {"labels": ["展開（地域）"]}},
+         {"name": "展開科目（グローバル）", "min": 4, "match": {"labels": ["展開（グローバル）"]}}],
+       "limits": [{"name": "他学部開講科目", "max": 10, "page": "1", "match": {"labels": ["他学部開講"]}}]},
+      {"id": "enshu", "name": "専門演習", "min": 10, "page": "2", "match": {"labels": ["専門演習"]}},
+      {"id": "ronbun", "name": "卒業論文", "min": 2, "page": "2", "match": {"labels": ["卒業論文"]}}
+    ]}
+  ],
+  "progression": [
+    {"name": "2年→3年 進級要件", "page": "1", "categories": {"senmon": 39},
+     "required": ["プレゼミナール", "基礎総合管理学I", "基礎総合管理学II", "基礎総合管理学演習", "専門演習I"],
+     "note": "2年次までに。転入学・編入学・再入学・転学部した者には進級要件なし"}
+  ],
+  "ask_office": [],
+  "notes": ["卒業には4年以上の在学が必要", "他学部開講科目は、演習・実習・実験を除き、10単位まで展開科目群の卒業要件に含められる（教職関連科目は除く）"]
+}

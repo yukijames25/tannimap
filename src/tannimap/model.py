@@ -339,10 +339,11 @@ def load_rules(data) -> Rules:
                 raise RulesError(f"{where}: cannot overflow into {t!r}, which does not count")
     _check_cycles(r)
     for i, p in enumerate(r.progression):
-        unknown = set(p) - {"name", "min_total", "categories", "in_year", "page", "note"}
+        unknown = set(p) - {"name", "min_total", "categories", "in_year", "required", "page", "note"}
         if unknown:
             raise RulesError(f"progression[{i}]: unknown keys {sorted(unknown)} "
-                             "(allowed: name, min_total, categories, in_year, page, note)")
+                             "(allowed: name, min_total, categories, in_year, required, page, note)")
+        _strs(p.get("required", []), f"progression[{i}].required")
         for cid in (p.get("categories") or {}):
             if cid not in r.by_id:
                 raise RulesError(f"progression[{i}]: no category with id {cid!r}")

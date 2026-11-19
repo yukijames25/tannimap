@@ -359,6 +359,9 @@ def progression(r: Rules, sc: Scenario, courses: list, entry_year: int | None, k
                 have = sum(c.credits for c in courses
                            if c.status in keep and _year_of_study(c, entry_year) == year)
                 lines.append((label, have, need))
+        for req in (p.get("required") or []):
+            got = any(_req_hit(req, c) and c.status in keep for c in courses)
+            lines.append((f"「{req[3:] if req.startswith('re:') else req}」", 1.0 if got else 0.0, 1.0))
         ok = None if any(h is None for _x, h, _m in lines) else all(h + EPS >= m for _x, h, m in lines)
         out.append({"name": str(p.get("name", "進級要件")), "page": str(p.get("page", "")),
                     "note": str(p.get("note", "")), "lines": lines, "ok": ok})

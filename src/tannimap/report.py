@@ -25,6 +25,12 @@ def _p(page: str) -> str:
     return f"（p.{page}）" if page[:1].isdigit() else f"（{page}）"
 
 
+def _prog_line(n, h, m) -> str:
+    if n.startswith("「"):  # a required course: shown as 修得 / 未修得
+        return f"{n} {'修得' if h and h >= m else '未修得'}"
+    return f"{n} {'?' if h is None else _n(h)}/{_n(m)}"
+
+
 def _ok(ok) -> str:
     return "判定できない" if ok is None else "満たしている" if ok else "満たしていない"
 
@@ -190,7 +196,7 @@ def text_report(r: Rules, result: dict, courses: list) -> str:
         L.append(f"■ {p['name']}: {_ok(p['ok'])}（修得済）" + (f"／{_ok(q['ok'])}（予定込み）" if has_plan else "")
                  + f"{_p(p['page'])}{('　' + p['note']) if p['note'] else ''}")
         src = q if has_plan else p
-        L.append("    " + "、".join(f"{n} {'?' if h is None else _n(h)}/{_n(m)}" for n, h, m in src["lines"])
+        L.append("    " + "、".join(_prog_line(n, h, m) for n, h, m in src["lines"])
                  + ("（予定込み）" if has_plan else ""))
     j = result["jasso"]
     if j:
@@ -321,7 +327,8 @@ def explain(r: Rules) -> str:
         tot = f"合計 {p['min_total']}" if "min_total" in p else ""
         iy = p.get("in_year")
         yr = f"{iy['year']}年次に{iy['min']}単位" if iy else ""
-        L.append(f"- 進級: {p.get('name', '')} {'、'.join(x for x in (tot, cats, yr) if x)}{_p(str(p.get('page', '')))}")
+        req = ("必修 " + "・".join(p.get("required"))) if p.get("required") else ""
+        L.append(f"- 進級: {p.get('name', '')} {'、'.join(x for x in (tot, cats, yr, req) if x)}{_p(str(p.get('page', '')))}")
     if r.ask_office:
         L.append("")
         L.append("学務に聞くこと（規則ファイルを作るときに分からなかった点）:")
