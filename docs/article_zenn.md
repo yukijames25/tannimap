@@ -3,7 +3,7 @@ title: "「この単位で卒業できますか」に、自分の便覧で答え
 emoji: "🎓"
 type: "tech"
 topics: ["python", "ai", "claudecode", "大学生", "個人開発"]
-published: false
+published: true
 ---
 
 ![tannimap — 自分の便覧で、自分の単位を照らし合わせる。](https://raw.githubusercontent.com/yukijames25/tannimap/main/assets/hero.png)

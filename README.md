@@ -25,6 +25,7 @@ tannimap は、この「規則をデータにする」部分を **AI に任せ�
 学生が自分の便覧を AI に渡すと、AI が便覧のページを根拠に規則ファイルを作り、学生がそれを便覧と見比べて確かめます。
 照合そのものは、規則ファイルに従って毎回同じように計算するプログラムが行います。
 
+作った経緯と測った結果は Zenn の記事「[「この単位で卒業できますか」に、自分の便覧で答えるツールを作った](https://zenn.dev/yukidev25/articles/ee3d255560f0d8)」にもまとめています。
 調査と、作る前に確かめた内容は [docs/research](docs/research/REPORT.md)、効果測定は [docs/EVALUATION.md](docs/EVALUATION.md) にあります。
 
 ## できること
