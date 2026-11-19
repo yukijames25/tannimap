@@ -44,10 +44,16 @@ description: Check a Japanese university student's grades and course plan agains
    | 「A で履修する場合は…、B で履修する場合は…」 | `alternatives` |
    | 「○○は必ず修得」「必修科目」（個別の科目名がある） | `required` |
    | 「春学期のみ登録できる」 | `term_only` |
-   | 「3年次までに○単位」「進級要件」 | `progression` |
+   | 「同一授業科目からは1授業2単位まで」 | `per_name_max: 2`（例外の科目は `per_name_exclude`） |
+   | 「履修できない」科目 | その科目だけを `names` で拾う `"counts": false` の区分を**先頭に**置く |
+   | 「（ ）付き」「（4単位）」など表記の約束 | 便覧の凡例のページを読み、`max` / `min` に正しく直す |
+   | 「3年次までに○単位」「進級要件」 | `progression`（`min_total` / `categories` / `in_year`） |
+   | 「1年次に○単位以上修得」 | `progression` の `in_year: {"year": 1, "min": 8}`（`check --entry-year` が必要） |
    | 入学年度で扱いが違う | その学生の入学年度の扱いだけを書き、`notes` に差を書く |
 
    - 2つの区分に同時に入りうる科目は、より具体的な区分を先（兄弟の中で前）に書く。科目は最初に当てはまった区分に入る。
+
+   - 資料がチェックシート1枚でページ番号が無いときは、`page` に「チェックシート 3年→4年の列」のように場所を書く（数字で始まらない `page` はそのまま表示される）。
 
 4. **検査する**: `tannimap validate rules.json` — エラーを直す。warning も読んで、便覧と食い違っていないか確かめる。
 
@@ -56,8 +62,10 @@ description: Check a Japanese university student's grades and course plan agains
 
 6. **照らし合わせる**:
    ```
-   tannimap check rules.json grades.csv [--plan plan.csv] [--years 在学年数]
+   tannimap check rules.json grades.csv [--plan plan.csv] [--entry-year 入学年度] [--years 在学年数]
    ```
+   - 終了コード: 0＝問題なし、1＝不足や不明点がある（報告に書いてある）、2＝エラー。1 は失敗ではない。
+   - `■ 成績表に一度も出てこない区分名` が出たら、その区分名は推測なので、成績表の表記と見比べてもらう（違っていると黙って0単位になる）。
    - `■ 規則にない区分の科目` が出たら、規則の `match` を推測で足さない。便覧で区分を確かめるか、学生に聞く。
    - 履修登録前の相談なら `--plan`（評価欄が空の表）で「予定どおり取れば足りるか」を見る。
 
@@ -95,7 +103,10 @@ description: Check a Japanese university student's grades and course plan agains
 }
 ```
 
-- `match`: `labels`（区分名と完全一致）、`label_patterns`（区分の正規表現）、`names`（科目名と完全一致）、`name_patterns`（科目名の正規表現）、`exclude_names` / `exclude_patterns`。全角・半角と空白の違いは無視して比べる。
+- `match`: `labels`（区分名と完全一致）、`label_patterns`（区分の正規表現）、`names`（科目名と完全一致）、`name_patterns`（科目名の正規表現）、`exclude_names` / `exclude_patterns`。**どれか1つに当てはまれば対象（または）**。`exclude_*` に当てはまるものは除く。全角・半角と空白の違いは無視して比べる。
+- 成績表の列名は、科目名（科目名・授業科目名）、区分（区分・科目区分・分類）、単位（単位・単位数）、評価（評価・成績・評語）、年度、学期、状態（履修中・予定）を認識する。
+- `progression` に書けるキーは `name`・`min_total`（卒業単位に数える単位の合計）・`categories`（区分id→最低単位）・`in_year`・`page`・`note`。修得済みと予定込みの両方で判定される。
+- `grading.gpa` を書かないと GPA は計算しない（他大学の点数で計算すると、正しく見えて間違うため）。
 - 子を持たない区分には `match` が必要。親の単位は子の合計（＋親自身の `match`）。
 - `same_group`: `{"name": "ひとつの言語で6単位", "key_pattern": "^教養外国語(.+?)[AB]", "min": 6, "conditions": [{"name": "中級", "min": 2, "match": {"name_patterns": ["B$"]}}]}`
 - `alternatives`: `[{"name": "英語で履修", "conditions": [...]}, {"name": "第二外国語で履修", "same_group": {...}}]` — どれか1つを満たせばよい。

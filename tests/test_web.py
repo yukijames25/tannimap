@@ -29,6 +29,7 @@ def random_cases(rules_text: str, n: int, seed: int) -> list:
     labels = sorted({x for c in r.walk() if c.match for x in c.match.labels})
     required = sorted({x for c in r.walk() for x in c.required if not x.startswith("re:")})
     rng = random.Random(seed)
+    grades = r.grading_pass[:4] + r.grading_fail[:1] + [""]
     cases = []
     for _ in range(n):
         g = ["科目名,区分,単位数,評価,年度"]
@@ -40,12 +41,12 @@ def random_cases(rules_text: str, n: int, seed: int) -> list:
                 if rng.random() < 0.15:
                     p.append(f"科目{k},{lab},{rng.choice([1, 2, 4])}")
                 else:
-                    g.append(f"科目{k},{lab},{rng.choice([1, 2, 2, 4])},{rng.choice(['A', 'B', 'C', 'S', 'F', ''])},"
+                    g.append(f"科目{k},{lab},{rng.choice([1, 2, 2, 4])},{rng.choice(grades)},"
                              f"{rng.choice([2024, 2025, 2026])}")
         for req in required:
             if rng.random() < 0.7:
-                g.append(f"{req},,2,A,2026")
-        g.append(f"謎の科目,未知の区分,2,A,2025")
+                g.append(f"{req},,2,{r.grading_pass[0]},2026")
+        g.append(f"謎の科目,未知の区分,2,{r.grading_pass[0]},2025")
         cases.append({"rules": rules_text, "grades": "\n".join(g), "plan": "\n".join(p) if len(p) > 1 else "",
                       "years": rng.choice([None, 2, 3]), "entry_year": rng.choice([None, 2024])})
     return cases
@@ -67,7 +68,8 @@ def python_side(case):
 class WebParity(unittest.TestCase):
     def test_same_results(self):
         cases = []
-        for path in (("tests", "data", "tufs_lc_from_mistakes.json"), ("tests", "data", "hosei_jinkan_2022.json")):
+        for path in (("tests", "data", "tufs_lc_from_mistakes.json"), ("tests", "data", "hosei_jinkan_2022.json"),
+                     ("tests", "data", "kagawa_edu_2025.json")):
             cases += random_cases(_read(*path), 60, seed=len(cases) + 7)
         cases.append({"rules": _read("examples", "tufs_rules.json"), "grades": _read("examples", "grades.csv"),
                       "plan": _read("examples", "plan.csv"), "years": 2, "entry_year": 2024})

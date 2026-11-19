@@ -267,6 +267,11 @@ def explain(r: Rules) -> str:
         for x in c.limits:
             ov = f"、超過分は「{r.by_id[x.overflow_to].name}」へ" if x.overflow_to else ""
             L.append(f"{ind}    上限: {x.name}は{_n(x.max)}単位まで{ov}{_p(x.page)}")
+        if c.per_name_max is not None:
+            ex = ""
+            if c.per_name_exclude:
+                ex = "（" + "・".join(c.per_name_exclude.names + c.per_name_exclude.name_patterns + c.per_name_exclude.labels) + " を除く）"
+            L.append(f"{ind}    同じ授業科目は{_n(c.per_name_max)}単位まで{ex}")
         if c.same_group:
             L.append(f"{ind}    {_sg_text(c.same_group)}")
         for k, alt in enumerate(c.alternatives):

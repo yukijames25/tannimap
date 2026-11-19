@@ -149,6 +149,8 @@ class Category:
     page: str = ""
     note: str = ""
     term_only: dict = field(default_factory=dict)  # course -> "春学期のみ登録可" etc.
+    per_name_max: float | None = None   # 「同一授業科目は1授業2単位まで」: credits per course name
+    per_name_exclude: Match | None = None
     children: list = field(default_factory=list)
     parent: "Category | None" = None
 
@@ -197,7 +199,7 @@ def _page(d) -> str:
 
 
 CAT_KEYS = {"id", "name", "min", "max", "overflow", "match", "counts", "required", "conditions", "limits",
-            "same_group", "alternatives", "page", "note", "term_only", "children"}
+            "same_group", "alternatives", "page", "note", "term_only", "children", "per_name_max", "per_name_exclude"}
 
 
 def _conditions(lst, where) -> list:
@@ -241,6 +243,8 @@ def _category(d, where, parent=None) -> Category:
         required=_strs(d.get("required", []), f"{where}.required"),
         page=_page(d), note=str(d.get("note", "")),
         term_only={str(k): str(v) for k, v in (d.get("term_only") or {}).items()},
+        per_name_max=_num(d.get("per_name_max"), f"{where}.per_name_max", True),
+        per_name_exclude=Match.parse(d.get("per_name_exclude"), f"{where}.per_name_exclude"),
         parent=parent,
     )
     if c.overflow_to and c.max is None:

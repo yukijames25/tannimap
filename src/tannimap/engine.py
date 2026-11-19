@@ -166,8 +166,14 @@ def run_scenario(r: Rules, courses: list, name: str) -> Scenario:
         used_limit = {id(lim): 0.0 for lim in cat.limits}
         moved = {id(lim): 0.0 for lim in cat.limits}
         moved_max = 0.0
+        per_name: dict[str, float] = {}
         for it in items:
             room, binding = it.credits, None
+            capped_name = cat.per_name_max is not None and not (cat.per_name_exclude and cat.per_name_exclude.hits(it.course))
+            if capped_name:
+                left = cat.per_name_max - per_name.get(norm(it.course.name), 0.0)
+                if left < room - EPS:
+                    room, binding = max(0.0, left), "name"
             for lim in cat.limits:
                 if lim.match.hits(it.course):
                     left = lim.max - used_limit[id(lim)]
@@ -181,11 +187,17 @@ def run_scenario(r: Rules, courses: list, name: str) -> Scenario:
             if take > EPS:
                 res.items.append(Item(it.course, take, it.via))
                 res.counted += take
+                if capped_name:
+                    per_name[norm(it.course.name)] = per_name.get(norm(it.course.name), 0.0) + take
                 for lim in cat.limits:
                     if lim.match.hits(it.course):
                         used_limit[id(lim)] += take
             rest = it.credits - take
             if rest <= EPS:
+                continue
+            if binding == "name":
+                res.dropped.append(Dropped(it.course, rest, f"{cat.name}では同じ授業科目は{_n(cat.per_name_max)}単位まで"
+                                                            "。卒業単位に含まれない", cat.page))
                 continue
             if binding is cat:
                 to, cap, page, why = cat.overflow_to, cat.overflow_max, cat.page, f"{cat.name}は{_n(cat.max)}単位までしか算入されない"

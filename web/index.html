@@ -23,7 +23,7 @@
   button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:8px 14px; font-size:.95rem; cursor:pointer; }
   button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
   input[type=file] { font-size:.85rem; color:var(--sub); }
-  pre { white-space:pre-wrap; font-family: ui-monospace,"Cascadia Mono",Consolas,"Yu Gothic UI",monospace; font-size:.85rem; margin:0; overflow-x:auto; }
+  pre { white-space:pre-wrap; font-family: "BIZ UDGothic","MS Gothic","Osaka-Mono","Noto Sans Mono CJK JP",monospace; font-size:.85rem; margin:0; overflow-x:auto; }
   .err { color:var(--warn); font-weight:bold; }
   .note { color:var(--sub); font-size:.85rem; }
 </style>
@@ -133,7 +133,7 @@ var TANNIMAP = (function () {
       min: num(sg.min, where + ".min"), page: page(sg), conditions: conditions(sg.conditions, where + ".conditions") };
   }
   const CAT_KEYS = ["id", "name", "min", "max", "overflow", "match", "counts", "required", "conditions", "limits",
-    "same_group", "alternatives", "page", "note", "term_only", "children"];
+    "same_group", "alternatives", "page", "note", "term_only", "children", "per_name_max", "per_name_exclude"];
   function category(d, where, parent) {
     if (typeof d !== "object" || d === null || Array.isArray(d)) throw new RulesError(where + ": a category must be an object");
     const unknown = Object.keys(d).filter(k => !CAT_KEYS.includes(k));
@@ -148,6 +148,7 @@ var TANNIMAP = (function () {
       match: parseMatch(d.match, where), counts: d.counts === undefined ? true : !!d.counts,
       required: strs(d.required === undefined ? [] : d.required, where + ".required"),
       page: page(d), note: String(d.note || ""), term_only: {}, parent: parent || null,
+      per_name_max: num(d.per_name_max, where + ".per_name_max", true), per_name_exclude: parseMatch(d.per_name_exclude, where + ".per_name_exclude"),
       conditions: [], limits: [], same_group: null, alternatives: [], children: [] };
     for (const k of Object.keys(d.term_only || {})) c.term_only[String(k)] = String(d.term_only[k]);
     if (c.overflow_to && c.max === null) throw new RulesError(where + ": overflow needs max (the credits kept here)");
@@ -416,8 +417,11 @@ var TANNIMAP = (function () {
       items.sort(cmpKey);
       const used = cat.limits.map(() => 0), moved = cat.limits.map(() => 0);
       let movedMax = 0;
+      const perName = {};
       for (const it of items) {
         let room = it.credits, binding = null;
+        const cappedName = cat.per_name_max !== null && !(cat.per_name_exclude && hits(cat.per_name_exclude, it.course));
+        if (cappedName) { const left = cat.per_name_max - (perName[norm(it.course.name)] || 0); if (left < room - EPS) { room = Math.max(0, left); binding = "name"; } }
         cat.limits.forEach((lim, li) => { if (hits(lim.match, it.course)) { const left = lim.max - used[li]; if (left < room - EPS) { room = Math.max(0, left); binding = li; } } });
         if (cat.max !== null) { const left = cat.max - res.counted; if (left < room - EPS) { room = Math.max(0, left); binding = "cat"; } }
         const take = Math.min(it.credits, room);
@@ -425,9 +429,11 @@ var TANNIMAP = (function () {
           res.items.push({ course: it.course, credits: take, via: it.via });
           res.counted += take;
           cat.limits.forEach((lim, li) => { if (hits(lim.match, it.course)) used[li] += take; });
+          if (cappedName) perName[norm(it.course.name)] = (perName[norm(it.course.name)] || 0) + take;
         }
         const rest = it.credits - take;
         if (rest <= EPS) continue;
+        if (binding === "name") { res.dropped.push({ course: it.course, credits: rest, reason: cat.name + "では同じ授業科目は" + fmtN(cat.per_name_max) + "単位まで。卒業単位に含まれない", page: cat.page }); continue; }
         let to, cap, pg, why, already;
         if (binding === "cat") { to = cat.overflow_to; cap = cat.overflow_max; pg = cat.page; why = cat.name + "は" + fmtN(cat.max) + "単位までしか算入されない"; already = movedMax; }
         else { const b = cat.limits[binding]; to = b.overflow_to; cap = b.overflow_max; pg = b.page || cat.page; why = cat.name + "のうち「" + b.name + "」は" + fmtN(b.max) + "単位まで"; already = moved[binding]; }
